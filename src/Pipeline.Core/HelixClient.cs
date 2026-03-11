@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Azure.Core;
 using Kusto.Data;
+using Kusto.Data.Exceptions;
 using Kusto.Data.Net.Client;
 using Microsoft.Identity.Client.NativeInterop;
 
@@ -49,6 +50,22 @@ public class HelixWorkItemConsole
     public long WorkItemId { get; init; }
     [JsonPropertyName("text")]
     public required string Text { get; init; }
+}
+
+public class HelixWorkItemFile
+{
+    [JsonPropertyName("jobId")]
+    public long JobId { get; init; }
+    [JsonPropertyName("workItemId")]
+    public long WorkItemId { get; init; }
+    [JsonPropertyName("jobName")]
+    public required string JobName { get; init; }
+    [JsonPropertyName("fileName")]
+    public required string FileName { get; init; }
+    [JsonPropertyName("uri")]
+    public required string Uri { get; init; }
+    [JsonPropertyName("sizeBytes")]
+    public long SizeBytes { get; init; }
 }
 
 public sealed class HelixClient
@@ -187,6 +204,11 @@ public sealed class HelixClient
 
             return list;
         }
+        catch (KustoRequestException ex) when (ex.ErrorReason == "Unauthorized")
+        {
+            Console.WriteLine("Error: access denied. You are not authorized to query this Kusto database. Ensure your account has been granted access.");
+            throw;
+        }
         catch (Exception ex)
         {
             Console.WriteLine(ex.Message);
@@ -222,5 +244,78 @@ public sealed class HelixClient
             });
         }
         return list;
+    }
+
+    public async Task<List<HelixWorkItemFile>> GetFilesAsync(HelixWorkItem workItem)
+    {
+        return await GetFilesAsync([workItem]);
+    }
+
+    public async Task<List<HelixWorkItemFile>> GetFilesAsync(List<HelixWorkItem> workItems)
+    {
+        if (workItems.Count == 0)
+            return [];
+
+        var jobNameMap = workItems.ToDictionary(w => w.WorkItemId, w => w.JobName);
+        var workItemIds = string.Join(", ", workItems.Select(w => w.WorkItemId));
+        string query = $"""
+            Files
+            | where WorkItemId in ({workItemIds})
+            | project JobId, WorkItemId, FileName, Uri, SizeBytesLong
+            """;
+
+        try
+        {
+            using var kustoQueryClient = KustoClientFactory.CreateCslQueryProvider(KustoConnectionStringBuilder);
+            var reader = kustoQueryClient.ExecuteQuery(query);
+            var list = new List<HelixWorkItemFile>();
+
+            while (reader.Read())
+            {
+                var jobId = reader.GetInt64(0);
+                var workItemId = reader.GetInt64(1);
+                var fileName = reader.GetString(2);
+                var uri = reader.GetString(3);
+                var sizeBytes = reader.GetInt64(4);
+
+                var jobName = jobNameMap.GetValueOrDefault(workItemId, "unknown");
+
+                list.Add(new HelixWorkItemFile
+                {
+                    JobId = jobId,
+                    WorkItemId = workItemId,
+                    JobName = jobName,
+                    FileName = fileName,
+                    Uri = uri,
+                    SizeBytes = sizeBytes
+                });
+            }
+
+            return list;
+        }
+        catch (KustoRequestException ex) when (ex.ErrorReason == "Unauthorized")
+        {
+            Console.WriteLine("Error: access denied. You are not authorized to query this Kusto database. Ensure your account has been granted access.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex.Message);
+            Console.WriteLine("Error reading Kusto, are you connected to the VPN?");
+            throw;
+        }
+    }
+
+    public static async Task DownloadFilesAsync(List<HelixWorkItemFile> files, string outputDir)
+    {
+        using var httpClient = new HttpClient();
+        foreach (var file in files)
+        {
+            var dir = Path.Combine(outputDir, file.JobName, file.WorkItemId.ToString());
+            Directory.CreateDirectory(dir);
+            var filePath = Path.Combine(dir, file.FileName);
+            var bytes = await httpClient.GetByteArrayAsync(file.Uri);
+            await File.WriteAllBytesAsync(filePath, bytes);
+        }
     }
 }

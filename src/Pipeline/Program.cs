@@ -33,6 +33,7 @@ static async Task<int> RunHelixAsync(string[] args)
     {
         "workitems" => await RunHelixWorkItemsAsync(actionArgs),
         "console" => await RunHelixConsoleAsync(actionArgs),
+        "files" => await RunHelixFilesAsync(actionArgs),
         _ => PrintHelixUsage(),
     };
 }
@@ -66,7 +67,10 @@ static async Task<int> RunHelixWorkItemsAsync(string[] args)
         return 1;
     }
 
-    var credential = new DefaultAzureCredential();
+    var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions()
+    {
+        TenantId = "72f988bf-86f1-41af-91ab-2d7cd011db47",
+    });
     var helix = await HelixClient.CreateAsync(credential);
 
     List<HelixWorkItem> workItems;
@@ -172,6 +176,98 @@ static async Task<int> RunHelixConsoleAsync(string[] args)
     var consoles = await helix.GetConsolesAsync(workItems);
     var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
     Console.WriteLine(JsonSerializer.Serialize(consoles, jsonOptions));
+    return 0;
+}
+
+static async Task<int> RunHelixFilesAsync(string[] args)
+{
+    var repo = GetOption(args, "--repo");
+    var prValue = GetOption(args, "--pr");
+    var buildValue = GetOption(args, "--build");
+    var jobIdValue = GetOption(args, "--jobid");
+    var workItemIdValue = GetOption(args, "--workitemid");
+    var includeAll = HasFlag(args, "--all");
+    var download = HasFlag(args, "--download");
+    var downloadDir = GetOption(args, "--download") ?? ".pipeline-triage/files";
+
+    var credential = new DefaultAzureCredential();
+    var helix = await HelixClient.CreateAsync(credential);
+
+    List<HelixWorkItem> workItems;
+    if (jobIdValue is not null && workItemIdValue is not null)
+    {
+        if (!long.TryParse(jobIdValue, out var jobId))
+        {
+            Console.Error.WriteLine($"Error: --jobid must be a long, got '{jobIdValue}'");
+            return 1;
+        }
+
+        if (!long.TryParse(workItemIdValue, out var workItemId))
+        {
+            Console.Error.WriteLine($"Error: --workitemid must be a long, got '{workItemIdValue}'");
+            return 1;
+        }
+
+        var workItem = await helix.GetHelixWorkItemAsync(jobId, workItemId);
+        workItems = [workItem];
+    }
+    else
+    {
+        if (repo is null)
+        {
+            PrintHelixUsage();
+            return 1;
+        }
+
+        var parts = repo.Split('/');
+        if (parts.Length != 2)
+        {
+            Console.Error.WriteLine($"Error: --repo must be in owner/repository format, got '{repo}'");
+            return 1;
+        }
+
+        var owner = parts[0];
+        var repository = parts[1];
+
+        if (prValue is null && buildValue is null)
+        {
+            PrintHelixUsage();
+            return 1;
+        }
+
+        if (prValue is not null)
+        {
+            if (!int.TryParse(prValue, out var prNumber))
+            {
+                Console.Error.WriteLine($"Error: --pr must be an integer, got '{prValue}'");
+                return 1;
+            }
+            workItems = await helix.GetHelixWorkItemsForPullRequestAsync(owner, repository, prNumber, includeAll);
+        }
+        else
+        {
+            if (!int.TryParse(buildValue, out var buildNumber))
+            {
+                Console.Error.WriteLine($"Error: --build must be an integer, got '{buildValue}'");
+                return 1;
+            }
+            workItems = await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildNumber, includeAll);
+        }
+    }
+
+    var files = await helix.GetFilesAsync(workItems);
+
+    if (download)
+    {
+        await HelixClient.DownloadFilesAsync(files, downloadDir);
+        Console.WriteLine($"Downloaded {files.Count} file(s) to {downloadDir}");
+    }
+    else
+    {
+        var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
+        Console.WriteLine(JsonSerializer.Serialize(files, jsonOptions));
+    }
+
     return 0;
 }
 
@@ -293,6 +389,9 @@ static int PrintHelixUsage()
     Console.Error.WriteLine("  pipeline helix console --repo <owner/repo> --pr <number> [--all]");
     Console.Error.WriteLine("  pipeline helix console --repo <owner/repo> --build <number> [--all]");
     Console.Error.WriteLine("  pipeline helix console --jobid <id> --workitemid <id>");
+    Console.Error.WriteLine("  pipeline helix files --repo <owner/repo> --pr <number> [--all] [--download [dir]]");
+    Console.Error.WriteLine("  pipeline helix files --repo <owner/repo> --build <number> [--all] [--download [dir]]");
+    Console.Error.WriteLine("  pipeline helix files --jobid <id> --workitemid <id> [--download [dir]]");
     return 1;
 }
 
