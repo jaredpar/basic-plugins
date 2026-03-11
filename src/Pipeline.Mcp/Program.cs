@@ -1,4 +1,3 @@
-using Azure.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -11,10 +10,7 @@ builder.Logging.AddConsole(options =>
     options.LogToStandardErrorThreshold = LogLevel.Trace;
 });
 
-var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions()
-{
-    TenantId = "72f988bf-86f1-41af-91ab-2d7cd011db47",
-});
+var credential = PipelineUtils.CreateCredential();
 var helix = await HelixClient.CreateAsync(credential);
 builder.Services.AddSingleton(helix);
 

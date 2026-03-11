@@ -16,8 +16,7 @@ try {
   # Use an isolated directory so the copilot session doesn't try to use the tools in the
   # source directory
   Set-Location $dogfoodPath
-  copilot plugin uninstall pipeline-triage
-  copilot plugin install $pluginPath
+  copilot --plugin-dir $pluginPath
   copilot @args
 }
 finally {

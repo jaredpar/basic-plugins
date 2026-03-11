@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Azure.Identity;
 using Pipeline.Core;
 
 if (args.Length == 0)
@@ -67,10 +66,7 @@ static async Task<int> RunHelixWorkItemsAsync(string[] args)
         return 1;
     }
 
-    var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions()
-    {
-        TenantId = "72f988bf-86f1-41af-91ab-2d7cd011db47",
-    });
+    var credential = PipelineUtils.CreateCredential();
     var helix = await HelixClient.CreateAsync(credential);
 
     List<HelixWorkItem> workItems;
@@ -107,7 +103,7 @@ static async Task<int> RunHelixConsoleAsync(string[] args)
     var workItemIdValue = GetOption(args, "--workitemid");
     var includeAll = HasFlag(args, "--all");
 
-    var credential = new DefaultAzureCredential();
+    var credential = PipelineUtils.CreateCredential();
     var helix = await HelixClient.CreateAsync(credential);
 
     if (jobIdValue is not null && workItemIdValue is not null)
@@ -190,7 +186,7 @@ static async Task<int> RunHelixFilesAsync(string[] args)
     var download = HasFlag(args, "--download");
     var downloadDir = GetOption(args, "--download") ?? ".pipeline-triage/files";
 
-    var credential = new DefaultAzureCredential();
+    var credential = PipelineUtils.CreateCredential();
     var helix = await HelixClient.CreateAsync(credential);
 
     List<HelixWorkItem> workItems;
@@ -324,7 +320,7 @@ static async Task<int> RunAzdoBuildsAsync(string[] args)
         }
     }
 
-    var credential = new DefaultAzureCredential();
+    var credential = PipelineUtils.CreateCredential();
     var client = await AzdoClient.CreateAsync(credential, org, project);
     var builds = await client.GetRecentBuildsAsync(definitionId, top);
 
@@ -352,7 +348,7 @@ static async Task<int> RunAzdoTestsAsync(string[] args)
         return 1;
     }
 
-    var credential = new DefaultAzureCredential();
+    var credential = PipelineUtils.CreateCredential();
     var client = await AzdoClient.CreateAsync(credential, org, project);
     var failures = await client.GetTestFailuresAsync(buildId);
 
@@ -428,7 +424,7 @@ static async Task<int> RunAzdoTimelineAsync(string[] args)
         return 1;
     }
 
-    var credential = new DefaultAzureCredential();
+    var credential = PipelineUtils.CreateCredential();
     var client = await AzdoClient.CreateAsync(credential, org, project);
     var timeline = await client.GetTimelineAsync(buildId);
 
@@ -456,7 +452,7 @@ static async Task<int> RunAzdoArtifactsAsync(string[] args)
         return 1;
     }
 
-    var credential = new DefaultAzureCredential();
+    var credential = PipelineUtils.CreateCredential();
     var client = await AzdoClient.CreateAsync(credential, org, project);
     var artifacts = await client.GetArtifactsAsync(buildId);
 
@@ -486,7 +482,7 @@ static async Task<int> RunAzdoDownloadAsync(string[] args)
         return 1;
     }
 
-    var credential = new DefaultAzureCredential();
+    var credential = PipelineUtils.CreateCredential();
     var client = await AzdoClient.CreateAsync(credential, org, project);
     await client.DownloadArtifactAsync(buildId, artifactName, outputPath);
 
@@ -513,7 +509,7 @@ static async Task<int> RunAzdoJobsAsync(string[] args)
         return 1;
     }
 
-    var credential = new DefaultAzureCredential();
+    var credential = PipelineUtils.CreateCredential();
     var client = await AzdoClient.CreateAsync(credential, org, project);
     var timeline = await client.GetTimelineAsync(buildId);
     var jobs = timeline.Records
@@ -557,7 +553,7 @@ static async Task<int> RunAzdoPrBuildsAsync(string[] args)
         }
     }
 
-    var credential = new DefaultAzureCredential();
+    var credential = PipelineUtils.CreateCredential();
     var client = await AzdoClient.CreateAsync(credential, org, project);
     var builds = await client.GetBuildsForPullRequestAsync(repo, prNumber, top);
 
@@ -602,7 +598,7 @@ static async Task<int> RunAzdoRepoBuildsAsync(string[] args)
         _ => null,
     };
 
-    var credential = new DefaultAzureCredential();
+    var credential = PipelineUtils.CreateCredential();
     var client = await AzdoClient.CreateAsync(credential, org, project);
     var builds = await client.GetBuildsForRepositoryAsync(repo, top, reasonFilter);
 

@@ -6,10 +6,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Azure.Identity" Version="1.17.1" />
-  </ItemGroup>
-
-  <ItemGroup>
     <ProjectReference Include="..\Pipeline.Core\Pipeline.Core.csproj" />
   </ItemGroup>
 
