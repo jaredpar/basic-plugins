@@ -282,6 +282,7 @@ static async Task<int> RunAzdoAsync(string[] args)
     {
         "builds" => await RunAzdoBuildsAsync(actionArgs),
         "tests" => await RunAzdoTestsAsync(actionArgs),
+        "test-summary" => await RunAzdoTestSummaryAsync(actionArgs),
         "timeline" => await RunAzdoTimelineAsync(actionArgs),
         "artifacts" => await RunAzdoArtifactsAsync(actionArgs),
         "download" => await RunAzdoDownloadAsync(actionArgs),
@@ -396,6 +397,7 @@ static int PrintAzdoUsage()
     Console.Error.WriteLine("Usage:");
     Console.Error.WriteLine("  pipeline azdo builds [--definition <id>] [--top <n>] [--org <org>] [--project <project>]");
     Console.Error.WriteLine("  pipeline azdo tests --build <id> [--org <org>] [--project <project>]");
+    Console.Error.WriteLine("  pipeline azdo test-summary --build <id> [--org <org>] [--project <project>]");
     Console.Error.WriteLine("  pipeline azdo timeline --build <id> [--org <org>] [--project <project>]");
     Console.Error.WriteLine("  pipeline azdo artifacts --build <id> [--org <org>] [--project <project>]");
     Console.Error.WriteLine("  pipeline azdo jobs --build <id> [--org <org>] [--project <project>]");
@@ -403,6 +405,34 @@ static int PrintAzdoUsage()
     Console.Error.WriteLine("  pipeline azdo repo-builds --repo <owner/repo> [--pr] [--ci] [--top <n>] [--org <org>] [--project <project>]");
     Console.Error.WriteLine("  pipeline azdo download --build <id> --artifact <name> --output <path> [--org <org>] [--project <project>]");
     return 1;
+}
+
+static async Task<int> RunAzdoTestSummaryAsync(string[] args)
+{
+    var org = GetOption(args, "--org") ?? AzdoClient.DefaultOrganization;
+    var project = GetOption(args, "--project") ?? AzdoClient.DefaultProject;
+    var buildValue = GetOption(args, "--build");
+
+    if (buildValue is null)
+    {
+        Console.Error.WriteLine("Error: --build is required");
+        PrintAzdoUsage();
+        return 1;
+    }
+
+    if (!int.TryParse(buildValue, out var buildId))
+    {
+        Console.Error.WriteLine($"Error: --build must be an integer, got '{buildValue}'");
+        return 1;
+    }
+
+    var credential = PipelineUtils.CreateCredential();
+    var client = await AzdoClient.CreateAsync(credential, org, project);
+    var summaries = await client.GetTestSummaryByJobAsync(buildId);
+
+    var options = new JsonSerializerOptions { WriteIndented = true };
+    Console.WriteLine(JsonSerializer.Serialize(summaries, options));
+    return 0;
 }
 
 static async Task<int> RunAzdoTimelineAsync(string[] args)

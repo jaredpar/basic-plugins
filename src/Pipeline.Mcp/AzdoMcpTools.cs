@@ -58,6 +58,15 @@ public class AzdoMcpTools
         return JsonSerializer.Serialize(failures, s_jsonOptions);
     }
 
+    [McpServerTool(Name = "azdo_test_summary"), Description("Get test counts for each job (test run) in an AzDO build. Returns an array where each entry has job name, total test count, passed count, failed count, and skipped count.")]
+    public static async Task<string> GetTestSummary(
+        AzdoClient azdoClient,
+        [Description("The AzDO build ID")] int buildId)
+    {
+        var summaries = await azdoClient.GetTestSummaryByJobAsync(buildId);
+        return JsonSerializer.Serialize(summaries, s_jsonOptions);
+    }
+
     [McpServerTool(Name = "azdo_timeline"), Description("Get the timeline (all records) for an AzDO build.")]
     public static async Task<string> GetTimeline(
         AzdoClient azdoClient,

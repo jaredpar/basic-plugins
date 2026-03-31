@@ -82,6 +82,15 @@ public class AzdoArtifact
     public string? ResourceType { get; init; }
 }
 
+public class AzdoJobTestSummary
+{
+    public required string JobName { get; init; }
+    public int TotalCount { get; init; }
+    public int PassedCount { get; init; }
+    public int FailedCount { get; init; }
+    public int SkippedCount { get; init; }
+}
+
 public class AzdoTestFailure
 {
     [JsonPropertyName("testCaseTitle")]
@@ -265,6 +274,28 @@ public sealed class AzdoClient
         return failures;
     }
 
+    public async Task<List<AzdoJobTestSummary>> GetTestSummaryByJobAsync(int buildId)
+    {
+        var buildUri = $"vstfs:///Build/Build/{buildId}";
+        var runsUrl = $"_apis/test/runs?api-version=7.1&includeRunDetails=true&buildUri={Uri.EscapeDataString(buildUri)}";
+
+        var response = await HttpClient.GetAsync(runsUrl);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync();
+        var runs = JsonSerializer.Deserialize<AzdoListResponse<AzdoTestRun>>(json, s_jsonOptions)
+            ?? throw new InvalidOperationException("Failed to deserialize test runs response");
+
+        return runs.Value.Select(r => new AzdoJobTestSummary
+        {
+            JobName = r.Name,
+            TotalCount = r.TotalTests,
+            PassedCount = r.PassedTests,
+            FailedCount = r.TotalTests - r.PassedTests - r.NotApplicableTests,
+            SkippedCount = r.NotApplicableTests,
+        }).ToList();
+    }
+
     public async Task<AzdoTimeline> GetTimelineAsync(int buildId)
     {
         var url = $"_apis/build/builds/{buildId}/timeline?api-version=7.1";
@@ -388,6 +419,18 @@ public sealed class AzdoClient
 
         [JsonPropertyName("name")]
         public required string Name { get; init; }
+
+        [JsonPropertyName("totalTests")]
+        public int TotalTests { get; init; }
+
+        [JsonPropertyName("passedTests")]
+        public int PassedTests { get; init; }
+
+        [JsonPropertyName("unanalyzedTests")]
+        public int UnanalyzedTests { get; init; }
+
+        [JsonPropertyName("notApplicableTests")]
+        public int NotApplicableTests { get; init; }
     }
 
     private class AzdoTestResult
