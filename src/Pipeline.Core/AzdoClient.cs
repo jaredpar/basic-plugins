@@ -133,6 +133,18 @@ public sealed class AzdoClient
         Project = project;
     }
 
+    private static void EnsureAuthenticatedResponse(HttpResponseMessage response)
+    {
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            throw new PipelineAuthenticationException(
+                "Authentication failed: the Azure DevOps request returned 401 Unauthorized. " +
+                "Ensure your account has access and you are logged in (e.g., with 'az login').");
+        }
+
+        response.EnsureSuccessStatusCode();
+    }
+
     public static async Task<AzdoClient> CreateAsync(
         TokenCredential tokenCredential,
         string organization = DefaultOrganization,
@@ -162,7 +174,7 @@ public sealed class AzdoClient
         }
 
         var response = await HttpClient.GetAsync(url);
-        response.EnsureSuccessStatusCode();
+        EnsureAuthenticatedResponse(response);
 
         var json = await response.Content.ReadAsStringAsync();
         var result = JsonSerializer.Deserialize<AzdoListResponse<AzdoBuildRaw>>(json, s_jsonOptions)
@@ -190,7 +202,7 @@ public sealed class AzdoClient
         }
 
         var response = await HttpClient.GetAsync(url);
-        response.EnsureSuccessStatusCode();
+        EnsureAuthenticatedResponse(response);
 
         var json = await response.Content.ReadAsStringAsync();
         var result = JsonSerializer.Deserialize<AzdoListResponse<AzdoBuildRaw>>(json, s_jsonOptions)
@@ -215,7 +227,7 @@ public sealed class AzdoClient
         var url = $"_apis/build/builds?api-version=7.1&$top={top}&branchName={Uri.EscapeDataString(branchName)}&repositoryId={Uri.EscapeDataString(repository)}&repositoryType=GitHub";
 
         var response = await HttpClient.GetAsync(url);
-        response.EnsureSuccessStatusCode();
+        EnsureAuthenticatedResponse(response);
 
         var json = await response.Content.ReadAsStringAsync();
         var result = JsonSerializer.Deserialize<AzdoListResponse<AzdoBuildRaw>>(json, s_jsonOptions)
@@ -240,7 +252,7 @@ public sealed class AzdoClient
         var runsUrl = $"_apis/test/runs?api-version=7.1&buildUri={Uri.EscapeDataString(buildUri)}";
 
         var runsResponse = await HttpClient.GetAsync(runsUrl);
-        runsResponse.EnsureSuccessStatusCode();
+        EnsureAuthenticatedResponse(runsResponse);
 
         var runsJson = await runsResponse.Content.ReadAsStringAsync();
         var runs = JsonSerializer.Deserialize<AzdoListResponse<AzdoTestRun>>(runsJson, s_jsonOptions)
@@ -251,7 +263,7 @@ public sealed class AzdoClient
         {
             var resultsUrl = $"_apis/test/Runs/{run.Id}/results?api-version=7.1&outcomes=Failed";
             var resultsResponse = await HttpClient.GetAsync(resultsUrl);
-            resultsResponse.EnsureSuccessStatusCode();
+            EnsureAuthenticatedResponse(resultsResponse);
 
             var resultsJson = await resultsResponse.Content.ReadAsStringAsync();
             var results = JsonSerializer.Deserialize<AzdoListResponse<AzdoTestResult>>(resultsJson, s_jsonOptions)
@@ -280,7 +292,7 @@ public sealed class AzdoClient
         var runsUrl = $"_apis/test/runs?api-version=7.1&includeRunDetails=true&buildUri={Uri.EscapeDataString(buildUri)}";
 
         var response = await HttpClient.GetAsync(runsUrl);
-        response.EnsureSuccessStatusCode();
+        EnsureAuthenticatedResponse(response);
 
         var json = await response.Content.ReadAsStringAsync();
         var runs = JsonSerializer.Deserialize<AzdoListResponse<AzdoTestRun>>(json, s_jsonOptions)
@@ -300,7 +312,7 @@ public sealed class AzdoClient
     {
         var url = $"_apis/build/builds/{buildId}/timeline?api-version=7.1";
         var response = await HttpClient.GetAsync(url);
-        response.EnsureSuccessStatusCode();
+        EnsureAuthenticatedResponse(response);
 
         var json = await response.Content.ReadAsStringAsync();
         var raw = JsonSerializer.Deserialize<AzdoTimelineRaw>(json, s_jsonOptions)
@@ -337,7 +349,7 @@ public sealed class AzdoClient
     {
         var url = $"_apis/build/builds/{buildId}/artifacts?api-version=7.1";
         var response = await HttpClient.GetAsync(url);
-        response.EnsureSuccessStatusCode();
+        EnsureAuthenticatedResponse(response);
 
         var json = await response.Content.ReadAsStringAsync();
         var raw = JsonSerializer.Deserialize<AzdoListResponse<AzdoArtifactRaw>>(json, s_jsonOptions)
@@ -362,7 +374,7 @@ public sealed class AzdoClient
             ?? throw new InvalidOperationException($"Artifact '{artifactName}' has no download URL");
 
         using var response = await HttpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
-        response.EnsureSuccessStatusCode();
+        EnsureAuthenticatedResponse(response);
 
         using var fileStream = File.Create(outputPath);
         await response.Content.CopyToAsync(fileStream);

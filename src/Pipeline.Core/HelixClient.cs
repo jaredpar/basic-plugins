@@ -206,13 +206,13 @@ public sealed class HelixClient
         }
         catch (KustoRequestException ex) when (ex.ErrorReason == "Unauthorized")
         {
-            Console.WriteLine("Error: access denied. You are not authorized to query this Kusto database. Ensure your account has been granted access.");
+            Console.Error.WriteLine("Error: access denied. You are not authorized to query this Kusto database. Ensure your account has been granted access.");
             throw;
         }
         catch (Exception ex)
         {
-            Console.WriteLine(ex.Message);
-            Console.WriteLine("Error reading Kusto, are you connected to the VPN?");
+            Console.Error.WriteLine(ex.Message);
+            Console.Error.WriteLine("Error reading Kusto, are you connected to the VPN?");
             throw;
         }
     }
@@ -295,13 +295,13 @@ public sealed class HelixClient
         }
         catch (KustoRequestException ex) when (ex.ErrorReason == "Unauthorized")
         {
-            Console.WriteLine("Error: access denied. You are not authorized to query this Kusto database. Ensure your account has been granted access.");
+            Console.Error.WriteLine("Error: access denied. You are not authorized to query this Kusto database. Ensure your account has been granted access.");
             throw;
         }
         catch (Exception ex)
         {
-            Console.WriteLine(ex.Message);
-            Console.WriteLine("Error reading Kusto, are you connected to the VPN?");
+            Console.Error.WriteLine(ex.Message);
+            Console.Error.WriteLine("Error reading Kusto, are you connected to the VPN?");
             throw;
         }
     }

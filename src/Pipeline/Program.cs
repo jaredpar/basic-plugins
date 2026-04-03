@@ -1,3 +1,4 @@
+using Azure.Identity;
 using System.Text.Json;
 using Pipeline.Core;
 
@@ -10,12 +11,26 @@ if (args.Length == 0)
 var subcommand = args[0];
 var subArgs = args[1..];
 
-return subcommand switch
+try
 {
-    "helix" => await RunHelixAsync(subArgs),
-    "azdo" => await RunAzdoAsync(subArgs),
-    _ => PrintUsage(),
-};
+    return subcommand switch
+    {
+        "helix" => await RunHelixAsync(subArgs),
+        "azdo" => await RunAzdoAsync(subArgs),
+        _ => PrintUsage(),
+    };
+}
+catch (AuthenticationFailedException ex)
+{
+    Console.Error.WriteLine("Error: Authentication failed. Ensure you are logged in (e.g., with 'az login').");
+    Console.Error.WriteLine(ex.Message);
+    return 1;
+}
+catch (PipelineAuthenticationException ex)
+{
+    Console.Error.WriteLine(ex.Message);
+    return 1;
+}
 
 static async Task<int> RunHelixAsync(string[] args)
 {
