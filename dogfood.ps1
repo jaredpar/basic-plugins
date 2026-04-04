@@ -10,7 +10,7 @@ New-Item -ItemType Directory -Path $workingPath -Force | Out-Null
 New-Item -ItemType Directory -Path $pluginsPath -Force | Out-Null
 New-Item -ItemType Directory -Path $packagePath -Force | Out-Null
 
-dotnet pack (Join-Path $pipelineRoot "Pipeline.slnx") -c Debug --nologo -o $packagePath
+dotnet pack (Join-Path $pipelineRoot "Pipeline.slnx") -c Release --nologo -o $packagePath
 New-Item -ItemType Directory -Path $pluginsPath -Force | Out-Null
 Copy-Item -Path (Join-Path $pipelineRoot "plugins\*") -Destination $pluginsPath -Recurse -Force
 

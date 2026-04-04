@@ -11,11 +11,8 @@ builder.Logging.AddConsole(options =>
 });
 
 var credential = PipelineUtils.CreateCredential();
-var helix = await HelixClient.CreateAsync(credential);
-builder.Services.AddSingleton(helix);
-
-var azdoClient = await AzdoClient.CreateAsync(credential);
-builder.Services.AddSingleton(azdoClient);
+builder.Services.AddSingleton(HelixClient.Create(credential));
+builder.Services.AddSingleton(AzdoClient.Create(credential));
 
 builder.Services
     .AddMcpServer()

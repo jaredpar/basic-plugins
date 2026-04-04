@@ -133,22 +133,29 @@ public sealed class AzdoClient
         Project = project;
     }
 
-    public static async Task<AzdoClient> CreateAsync(
+    /// <summary>
+    /// Creates a new <see cref="AzdoClient"/>. Authentication is deferred
+    /// until the first HTTP request is made.
+    /// </summary>
+    public static AzdoClient Create(
         TokenCredential tokenCredential,
         string organization = DefaultOrganization,
         string project = DefaultProject)
     {
-        var tokenRequestContext = new TokenRequestContext(["499b84ac-1321-427f-aa17-267ca6975798/.default"]);
-        var token = await tokenCredential.GetTokenAsync(tokenRequestContext, default);
-
-        var httpClient = new HttpClient
+        var httpClient = new HttpClient(new BearerTokenHandler(tokenCredential))
         {
             BaseAddress = new Uri($"https://dev.azure.com/{organization}/{project}/"),
         };
-        httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
 
         return new AzdoClient(httpClient, organization, project);
     }
+
+    /// <inheritdoc cref="Create"/>
+    public static Task<AzdoClient> CreateAsync(
+        TokenCredential tokenCredential,
+        string organization = DefaultOrganization,
+        string project = DefaultProject) =>
+        Task.FromResult(Create(tokenCredential, organization, project));
 
     private string GetBuildUri(int buildId) =>
         $"https://dev.azure.com/{Organization}/{Project}/_build/results?buildId={buildId}";
@@ -536,5 +543,25 @@ public sealed class AzdoClient
 
         [JsonPropertyName("type")]
         public string? Type { get; init; }
+    }
+
+    private sealed class BearerTokenHandler : DelegatingHandler
+    {
+        private readonly TokenCredential _credential;
+        private readonly TokenRequestContext _context = new(["499b84ac-1321-427f-aa17-267ca6975798/.default"]);
+
+        public BearerTokenHandler(TokenCredential credential)
+            : base(new HttpClientHandler())
+        {
+            _credential = credential;
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var token = await _credential.GetTokenAsync(_context, cancellationToken);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+            return await base.SendAsync(request, cancellationToken);
+        }
     }
 }

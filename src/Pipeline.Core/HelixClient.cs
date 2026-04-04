@@ -73,23 +73,26 @@ public sealed class HelixClient
     private const string ClusterUrl = "https://engsrvprod.kusto.windows.net";
     private const string DatabaseName = "engineeringdata";
 
-    private AccessToken AccessToken { get; } 
+    private static readonly TokenRequestContext s_kustoTokenContext = new(["https://kusto.kusto.windows.net/.default"]);
+
     private KustoConnectionStringBuilder KustoConnectionStringBuilder { get; }
 
-    private HelixClient(AccessToken accessToken)
+    private HelixClient(TokenCredential tokenCredential)
     {
-        AccessToken = accessToken;
         KustoConnectionStringBuilder = new KustoConnectionStringBuilder(ClusterUrl, DatabaseName)
-            .WithAadTokenProviderAuthentication(() => AccessToken.Token);
+            .WithAadTokenProviderAuthentication(() =>
+                tokenCredential.GetToken(s_kustoTokenContext, default).Token);
     }
 
-    public static async Task<HelixClient> CreateAsync(TokenCredential tokenCredential)
-    {
-        var tokenRequestContext = new TokenRequestContext(["https://kusto.kusto.windows.net/.default"]);
-        var token = await tokenCredential.GetTokenAsync(tokenRequestContext, default);
+    /// <summary>
+    /// Creates a new <see cref="HelixClient"/>. Authentication is deferred
+    /// until the first Kusto query is executed.
+    /// </summary>
+    public static HelixClient Create(TokenCredential tokenCredential) => new(tokenCredential);
 
-        return new HelixClient(token);
-    } 
+    /// <inheritdoc cref="Create"/>
+    public static Task<HelixClient> CreateAsync(TokenCredential tokenCredential) =>
+        Task.FromResult(Create(tokenCredential));
 
     public Task<List<HelixWorkItem>> GetHelixWorkItemsForBuildAsync(string owner, string repository, int buildNumber, bool includeAll = false)
     {
