@@ -52,45 +52,55 @@ public class AzdoMcpTools
     [McpServerTool(Name = "azdo_test_failures"), Description("Get test failures for an AzDO build.")]
     public static async Task<string> GetTestFailures(
         AzdoClient azdoClient,
-        [Description("The AzDO build ID")] int buildId)
+        [Description("The AzDO build ID (integer like 1379081)")] string buildId)
     {
-        var failures = await azdoClient.GetTestFailuresAsync(buildId);
+        var failures = int.TryParse(buildId, out var id)
+            ? await azdoClient.GetTestFailuresAsync(id)
+            : await azdoClient.GetTestFailuresAsync(buildId);
         return JsonSerializer.Serialize(failures, s_jsonOptions);
     }
 
     [McpServerTool(Name = "azdo_test_summary"), Description("Get test counts for each job (test run) in an AzDO build. Returns an array where each entry has job name, total test count, passed count, failed count, and skipped count.")]
     public static async Task<string> GetTestSummary(
         AzdoClient azdoClient,
-        [Description("The AzDO build ID")] int buildId)
+        [Description("The AzDO build ID (integer like 1379081)")] string buildId)
     {
-        var summaries = await azdoClient.GetTestSummaryByJobAsync(buildId);
+        var summaries = int.TryParse(buildId, out var id)
+            ? await azdoClient.GetTestSummaryByJobAsync(id)
+            : await azdoClient.GetTestSummaryByJobAsync(buildId);
         return JsonSerializer.Serialize(summaries, s_jsonOptions);
     }
 
     [McpServerTool(Name = "azdo_timeline"), Description("Get the timeline (all records) for an AzDO build.")]
     public static async Task<string> GetTimeline(
         AzdoClient azdoClient,
-        [Description("The AzDO build ID")] int buildId)
+        [Description("The AzDO build ID (integer like 1379081)")] string buildId)
     {
-        var timeline = await azdoClient.GetTimelineAsync(buildId);
+        var timeline = int.TryParse(buildId, out var id)
+            ? await azdoClient.GetTimelineAsync(id)
+            : await azdoClient.GetTimelineAsync(buildId);
         return JsonSerializer.Serialize(timeline, s_jsonOptions);
     }
 
     [McpServerTool(Name = "azdo_artifacts"), Description("Get build artifacts for an AzDO build.")]
     public static async Task<string> GetArtifacts(
         AzdoClient azdoClient,
-        [Description("The AzDO build ID")] int buildId)
+        [Description("The AzDO build ID (integer like 1379081)")] string buildId)
     {
-        var artifacts = await azdoClient.GetArtifactsAsync(buildId);
+        var artifacts = int.TryParse(buildId, out var id)
+            ? await azdoClient.GetArtifactsAsync(id)
+            : await azdoClient.GetArtifactsAsync(buildId);
         return JsonSerializer.Serialize(artifacts, s_jsonOptions);
     }
 
     [McpServerTool(Name = "azdo_jobs"), Description("Get job records from an AzDO build timeline.")]
     public static async Task<string> GetJobs(
         AzdoClient azdoClient,
-        [Description("The AzDO build ID")] int buildId)
+        [Description("The AzDO build ID (integer like 1379081)")] string buildId)
     {
-        var timeline = await azdoClient.GetTimelineAsync(buildId);
+        var timeline = int.TryParse(buildId, out var id)
+            ? await azdoClient.GetTimelineAsync(id)
+            : await azdoClient.GetTimelineAsync(buildId);
         var jobs = timeline.Records
             .Where(r => r.RecordType == "Job")
             .OrderBy(r => r.Order)

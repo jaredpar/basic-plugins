@@ -15,10 +15,12 @@ public class HelixMcpTools
         HelixClient helix,
         [Description("The repository owner (e.g. dotnet)")] string owner,
         [Description("The repository name (e.g. roslyn)")] string repository,
-        [Description("The AzDO build ID")] int buildId,
+        [Description("The AzDO build ID (integer like 1379081)")] string buildId,
         [Description("WARNING: Do not set to true unless the user explicitly asks for succeeded/passing work items. This is an expensive query. Default (false) returns only failed items which is correct for nearly all use cases.")] bool includeAll = false)
     {
-        var items = await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll);
+        var items = int.TryParse(buildId, out var id)
+            ? await helix.GetHelixWorkItemsForBuildAsync(owner, repository, id, includeAll)
+            : await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll);
         return JsonSerializer.Serialize(items, s_jsonOptions);
     }
 
@@ -39,10 +41,12 @@ public class HelixMcpTools
         HelixClient helix,
         [Description("The repository owner (e.g. dotnet)")] string owner,
         [Description("The repository name (e.g. roslyn)")] string repository,
-        [Description("The AzDO build ID")] int buildId,
+        [Description("The AzDO build ID (integer like 1379081)")] string buildId,
         [Description("WARNING: Do not set to true unless the user explicitly asks for succeeded/passing work items. This is an expensive query. Default (false) returns only failed items which is correct for nearly all use cases.")] bool includeAll = false)
     {
-        var items = await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll);
+        var items = int.TryParse(buildId, out var id)
+            ? await helix.GetHelixWorkItemsForBuildAsync(owner, repository, id, includeAll)
+            : await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll);
         var consoles = await helix.GetConsolesAsync(items);
         return JsonSerializer.Serialize(consoles, s_jsonOptions);
     }
@@ -76,10 +80,12 @@ public class HelixMcpTools
         HelixClient helix,
         [Description("The repository owner (e.g. dotnet)")] string owner,
         [Description("The repository name (e.g. roslyn)")] string repository,
-        [Description("The AzDO build ID")] int buildId,
+        [Description("The AzDO build ID (integer like 1379081)")] string buildId,
         [Description("WARNING: Do not set to true unless the user explicitly asks for succeeded/passing work items. This is an expensive query. Default (false) returns only failed items which is correct for nearly all use cases.")] bool includeAll = false)
     {
-        var items = await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll);
+        var items = int.TryParse(buildId, out var id)
+            ? await helix.GetHelixWorkItemsForBuildAsync(owner, repository, id, includeAll)
+            : await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll);
         var files = await helix.GetFilesAsync(items);
         return JsonSerializer.Serialize(files, s_jsonOptions);
     }

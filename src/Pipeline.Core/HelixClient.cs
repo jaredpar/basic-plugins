@@ -116,6 +116,28 @@ public sealed class HelixClient
         return QueryHelixWorkItem(query);
     }
 
+    public Task<List<HelixWorkItem>> GetHelixWorkItemsForBuildAsync(string owner, string repository, string buildNumber, bool includeAll = false)
+    {
+        var failedFilter = includeAll ? "" : "| where ExitCode != 0";
+        string query = $"""
+            Jobs
+            | where Repository == "{owner}/{repository}"
+            | project-away Started, Finished
+            | join kind=inner WorkItems on JobId
+            | extend p = parse_json(Properties)
+            | extend AzdoBuildId = toint(p["BuildId"])
+            | where tostring(p["BuildNumber"]) == "{buildNumber}"
+            | extend AzdoPhaseName = tostring(p["System.PhaseName"])
+            | extend AzdoAttempt = tostring(p["System.JobAttempt"])
+            | extend ExecutionTime = (Finished - Started) / 1s
+            | extend QueuedTime = (Started - Queued) / 1s
+            {failedFilter}
+            | project FriendlyName, ExecutionTime, QueuedTime, AzdoBuildId, AzdoPhaseName, AzdoAttempt, MachineName, ExitCode, ConsoleUri, JobId, JobName, QueueName, Finished, WorkItemId, Status
+            """;
+
+        return QueryHelixWorkItem(query);
+    }
+
     public Task<List<HelixWorkItem>> GetHelixWorkItemsForPullRequestAsync(string owner, string repository, int prNumber, bool includeAll = false)
     {
         var failedFilter = includeAll ? "" : "| where ExitCode != 0";

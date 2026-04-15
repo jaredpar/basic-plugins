@@ -81,12 +81,9 @@ static async Task<int> RunHelixWorkItemsAsync(string[] args)
     }
     else
     {
-        if (!int.TryParse(buildValue, out var buildId))
-        {
-            Console.Error.WriteLine($"Error: --build must be an integer, got '{buildValue}'");
-            return 1;
-        }
-        workItems = await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll);
+        workItems = int.TryParse(buildValue, out var buildId)
+            ? await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll)
+            : await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildValue!, includeAll);
     }
 
     var options = new JsonSerializerOptions { WriteIndented = true };
@@ -161,12 +158,9 @@ static async Task<int> RunHelixConsoleAsync(string[] args)
     }
     else
     {
-        if (!int.TryParse(buildValue, out var buildId))
-        {
-            Console.Error.WriteLine($"Error: --build must be an integer, got '{buildValue}'");
-            return 1;
-        }
-        workItems = await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll);
+        workItems = int.TryParse(buildValue, out var buildId)
+            ? await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll)
+            : await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildValue!, includeAll);
     }
 
     var consoles = await helix.GetConsolesAsync(workItems);
@@ -242,12 +236,9 @@ static async Task<int> RunHelixFilesAsync(string[] args)
         }
         else
         {
-            if (!int.TryParse(buildValue, out var buildId))
-            {
-                Console.Error.WriteLine($"Error: --build must be an integer, got '{buildValue}'");
-                return 1;
-            }
-            workItems = await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll);
+            workItems = int.TryParse(buildValue, out var buildId)
+                ? await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll)
+                : await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildValue!, includeAll);
         }
     }
 
