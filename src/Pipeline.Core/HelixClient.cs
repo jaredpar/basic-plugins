@@ -94,7 +94,7 @@ public sealed class HelixClient
     public static Task<HelixClient> CreateAsync(TokenCredential tokenCredential) =>
         Task.FromResult(Create(tokenCredential));
 
-    public Task<List<HelixWorkItem>> GetHelixWorkItemsForBuildAsync(string owner, string repository, int buildNumber, bool includeAll = false)
+    public Task<List<HelixWorkItem>> GetHelixWorkItemsForBuildAsync(string owner, string repository, int buildId, bool includeAll = false)
     {
         var failedFilter = includeAll ? "" : "| where ExitCode != 0";
         string query = $"""
@@ -104,7 +104,7 @@ public sealed class HelixClient
             | join kind=inner WorkItems on JobId
             | extend p = parse_json(Properties)
             | extend AzdoBuildId = toint(p["BuildId"])
-            | where AzdoBuildId == {buildNumber}
+            | where AzdoBuildId == {buildId}
             | extend AzdoPhaseName = tostring(p["System.PhaseName"])
             | extend AzdoAttempt = tostring(p["System.JobAttempt"])
             | extend ExecutionTime = (Finished - Started) / 1s

@@ -81,12 +81,12 @@ static async Task<int> RunHelixWorkItemsAsync(string[] args)
     }
     else
     {
-        if (!int.TryParse(buildValue, out var buildNumber))
+        if (!int.TryParse(buildValue, out var buildId))
         {
             Console.Error.WriteLine($"Error: --build must be an integer, got '{buildValue}'");
             return 1;
         }
-        workItems = await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildNumber, includeAll);
+        workItems = await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll);
     }
 
     var options = new JsonSerializerOptions { WriteIndented = true };
@@ -161,12 +161,12 @@ static async Task<int> RunHelixConsoleAsync(string[] args)
     }
     else
     {
-        if (!int.TryParse(buildValue, out var buildNumber))
+        if (!int.TryParse(buildValue, out var buildId))
         {
             Console.Error.WriteLine($"Error: --build must be an integer, got '{buildValue}'");
             return 1;
         }
-        workItems = await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildNumber, includeAll);
+        workItems = await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll);
     }
 
     var consoles = await helix.GetConsolesAsync(workItems);
@@ -242,12 +242,12 @@ static async Task<int> RunHelixFilesAsync(string[] args)
         }
         else
         {
-            if (!int.TryParse(buildValue, out var buildNumber))
+            if (!int.TryParse(buildValue, out var buildId))
             {
                 Console.Error.WriteLine($"Error: --build must be an integer, got '{buildValue}'");
                 return 1;
             }
-            workItems = await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildNumber, includeAll);
+            workItems = await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll);
         }
     }
 
