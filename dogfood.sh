@@ -21,6 +21,7 @@ install() {
     copilot mcp add "$plugin_name" "$repo_root/artifacts/bin/Pipeline.Mcp/debug/Pipeline.Mcp"
     mkdir -p ~/.copilot/skills
     ln -s "$repo_root/plugins/basic-triage-mcp/skills/azdo-helix" ~/.copilot/skills/azdo-helix
+    ln -s "$repo_root/plugins/basic-triage-mcp/skills/squirrel" ~/.copilot/skills/squirrel
 }
 
 undo_any() {
@@ -29,6 +30,7 @@ undo_any() {
     copilot plugin uninstall "$plugin_name@basic-plugins" 2>/dev/null || true
     copilot mcp remove "$plugin_name" 2>/dev/null || true
     rm ~/.copilot/skills/azdo-helix 2>/dev/null || true
+    rm ~/.copilot/skills/squirrel 2>/dev/null || true
 }
 
 undo() {
