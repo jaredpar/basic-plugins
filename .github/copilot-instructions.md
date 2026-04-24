@@ -6,7 +6,7 @@
 dotnet build Pipeline.slnx
 ```
 
-Both `Pipeline` and `Pipeline.Mcp` are packaged as `dotnet` tools (`PackAsTool`). Use `./dogfood.ps1` to build, pack, install the plugin locally, and launch Copilot CLI with it loaded.
+Both `Pipeline` and `Pipeline.Mcp` are packaged as `dotnet` tools (`PackAsTool`). Use `./dogfood.sh -i` to build, pack, and install the plugin locally. Use `./dogfood.sh -u` to uninstall local builds and reinstall from the marketplace.
 
 ## Architecture
 

@@ -7,7 +7,7 @@ This is a copilot plugin that helps with pipeline triage in the github.com/dotne
 
 This tool is still in early development and may have some rough edges.
 
-Run `./dogfood-mcp.ps1` to get started.
+Run `./scripts/dogfood.sh -i` to build and install the plugin locally, or `./scripts/dogfood.sh -u` to uninstall local builds and reinstall from the marketplace.
 
 Example prompts to try:
 
