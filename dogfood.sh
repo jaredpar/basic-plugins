@@ -23,7 +23,12 @@ install() {
     mkdir -p ~/.copilot/agents
     ln -s "$repo_root/plugins/basic-triage-mcp/skills/azdo-helix" ~/.copilot/skills/azdo-helix
     ln -s "$repo_root/plugins/basic-triage-mcp/skills/squirrel" ~/.copilot/skills/squirrel
+    ln -s "$repo_root/plugins/basic-triage-mcp/skills/flaky-test-analysis" ~/.copilot/skills/flaky-test-analysis
+    ln -s "$repo_root/plugins/basic-triage-mcp/skills/monitor-database" ~/.copilot/skills/monitor-database
     ln -s "$repo_root/plugins/basic-triage-mcp/agents/roslyn-health-report.md" ~/.copilot/agents/roslyn-health-report.md
+    ln -s "$repo_root/plugins/basic-triage-mcp/agents/flaky-test-triage.md" ~/.copilot/agents/flaky-test-triage.md
+    ln -s "$repo_root/plugins/basic-triage-mcp/agents/flaky-test-fix.md" ~/.copilot/agents/flaky-test-fix.md
+    ln -s "$repo_root/plugins/basic-triage-mcp/agents/build-import.md" ~/.copilot/agents/build-import.md
 }
 
 undo_any() {
@@ -33,7 +38,12 @@ undo_any() {
     copilot mcp remove "$plugin_name" 2>/dev/null || true
     rm ~/.copilot/skills/azdo-helix 2>/dev/null || true
     rm ~/.copilot/skills/squirrel 2>/dev/null || true
+    rm ~/.copilot/skills/flaky-test-analysis 2>/dev/null || true
+    rm ~/.copilot/skills/monitor-database 2>/dev/null || true
     rm ~/.copilot/agents/roslyn-health-report.md 2>/dev/null || true
+    rm ~/.copilot/agents/flaky-test-triage.md 2>/dev/null || true
+    rm ~/.copilot/agents/flaky-test-fix.md 2>/dev/null || true
+    rm ~/.copilot/agents/build-import.md 2>/dev/null || true
 }
 
 undo() {

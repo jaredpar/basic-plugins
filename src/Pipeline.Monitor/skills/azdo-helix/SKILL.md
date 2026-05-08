@@ -1,7 +1,7 @@
 ---
 name: azdo-helix
 description: A skill that explains how to query helix work items
---
+---
 
 Helix is a cloud-based testing platform that is used by the .NET team to run tests in parallel across a large number of machines. AzDO pipelines will create jobs that send a series of artifacts (tests and commands) to Helix, which then distributes the work across its pool of machines and returns the results back to AzDO. 
 
