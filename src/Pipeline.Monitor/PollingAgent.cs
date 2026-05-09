@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Text.Json;
 using GitHub.Copilot.SDK;
@@ -8,15 +7,16 @@ namespace Pipeline.Monitor;
 
 /// <summary>
 /// Manages the polling CopilotSession. Configures it with a system prompt and
-/// custom tools for querying AzDO/Helix and writing to SQLite. Buffers events
-/// for the watch command to display.
+/// custom tools for querying AzDO/Helix and writing to SQLite. Logs events
+/// to the shared MonitorLog.
 /// </summary>
 public sealed class PollingAgent : IAsyncDisposable
 {
     private readonly CopilotClient _client;
     private readonly MonitorDatabase _db;
     private readonly MonitorConfig _config;
-    private readonly ConcurrentQueue<AgentEvent> _eventLog = new();
+    private readonly MonitorLog _log;
+    private const string Source = "poller";
 
     private CopilotSession? _session;
     private IDisposable? _eventSubscription;
@@ -24,22 +24,14 @@ public sealed class PollingAgent : IAsyncDisposable
     public PollingAgent(
         CopilotClient client,
         MonitorDatabase db,
-        MonitorConfig config)
+        MonitorConfig config,
+        MonitorLog log)
     {
         _client = client;
         _db = db;
         _config = config;
+        _log = log;
     }
-
-    /// <summary>
-    /// All events emitted by the polling agent, in order.
-    /// </summary>
-    public IReadOnlyCollection<AgentEvent> Events => _eventLog;
-
-    /// <summary>
-    /// Fired when a new event is added to the log.
-    /// </summary>
-    public event Action<AgentEvent>? EventReceived;
 
     public async Task StartAsync()
     {
@@ -70,14 +62,6 @@ public sealed class PollingAgent : IAsyncDisposable
             """;
 
         // Resolve paths relative to the executable location
-        var appDir = AppContext.BaseDirectory;
-        var skillsDir = Path.Combine(appDir, "skills");
-
-        // The MCP server is the Pipeline.Mcp project. In development (artifacts layout),
-        // it's in a sibling directory. We resolve it relative to our output location.
-        var mcpServerDir = Path.GetFullPath(Path.Combine(appDir, "..", "..", "Pipeline.Mcp", "debug"));
-        var mcpServerDll = Path.Combine(mcpServerDir, "Pipeline.Mcp.dll");
-
         _session = await _client.CreateSessionAsync(new SessionConfig
         {
             Model = "claude-sonnet-4.5",
@@ -88,20 +72,14 @@ public sealed class PollingAgent : IAsyncDisposable
                 Content = systemMessage,
             },
             Tools = CreateTools(),
-            SkillDirectories = [skillsDir],
-            McpServers = new Dictionary<string, McpServerConfig>
-            {
-                ["basic-triage-mcp"] = new McpStdioServerConfig
-                {
-                    Command = "dotnet",
-                    Args = [mcpServerDll],
-                    Tools = ["*"],
-                },
-            },
+            SkillDirectories = SessionConfigHelper.SkillDirectories,
+            McpServers = SessionConfigHelper.McpServers,
         });
 
-        // Subscribe to session events for the watch command
+        // Subscribe to session events and forward to the shared log
         _eventSubscription = _session.On(OnSessionEvent);
+
+        _log.Info(Source, "Polling agent started");
 
         // Send the initial message to kick off polling
         await _session.SendAsync(new MessageOptions
@@ -112,20 +90,20 @@ public sealed class PollingAgent : IAsyncDisposable
 
     private void OnSessionEvent(SessionEvent evt)
     {
-        string? message = evt switch
+        switch (evt)
         {
-            AssistantMessageEvent msg => msg.Data.Content,
-            ToolExecutionStartEvent tool => $"[tool] Calling {tool.Data.ToolName}...",
-            ToolExecutionCompleteEvent tool => $"[tool] {tool.Data.ToolCallId} {(tool.Data.Success ? "completed" : "failed")}",
-            SessionErrorEvent err => $"[error] {err.Data.Message}",
-            _ => null,
-        };
-
-        if (message is not null)
-        {
-            var agentEvent = new AgentEvent(DateTime.Now, message);
-            _eventLog.Enqueue(agentEvent);
-            EventReceived?.Invoke(agentEvent);
+            case AssistantMessageEvent msg:
+                _log.Info(Source, msg.Data.Content);
+                break;
+            case ToolExecutionStartEvent tool:
+                _log.Tool(Source, $"Calling {tool.Data.ToolName}...");
+                break;
+            case ToolExecutionCompleteEvent tool:
+                _log.Tool(Source, $"{tool.Data.ToolCallId} {(tool.Data.Success ? "completed" : "failed")}");
+                break;
+            case SessionErrorEvent err:
+                _log.Error(Source, err.Data.Message);
+                break;
         }
     }
 
@@ -197,8 +175,3 @@ public sealed class PollingAgent : IAsyncDisposable
         public string? ErrorMessage { get; init; }
     }
 }
-
-/// <summary>
-/// A timestamped event from the polling agent.
-/// </summary>
-public sealed record AgentEvent(DateTime Timestamp, string Message);

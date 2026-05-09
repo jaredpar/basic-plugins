@@ -39,6 +39,10 @@ public sealed class MonitorDatabase : IDisposable
                 result TEXT,
                 finish_time TEXT,
                 has_test_failures INTEGER NOT NULL DEFAULT 0,
+                azdo_failure_state TEXT NOT NULL DEFAULT 'pending',
+                helix_failure_state TEXT NOT NULL DEFAULT 'pending',
+                collection_failures INTEGER NOT NULL DEFAULT 0,
+                last_collection_attempt TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
 
@@ -48,6 +52,21 @@ public sealed class MonitorDatabase : IDisposable
                 test_name TEXT NOT NULL,
                 outcome TEXT NOT NULL,
                 error_message TEXT,
+                stack_trace TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS helix_work_items (
+                id INTEGER PRIMARY KEY,
+                build_id INTEGER NOT NULL REFERENCES builds(id),
+                friendly_name TEXT NOT NULL,
+                exit_code INTEGER NOT NULL,
+                machine_name TEXT NOT NULL,
+                queue_name TEXT NOT NULL,
+                console_uri TEXT NOT NULL,
+                job_id INTEGER NOT NULL,
+                work_item_id INTEGER NOT NULL,
+                status TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
 
@@ -90,7 +109,9 @@ public sealed class MonitorDatabase : IDisposable
 
             CREATE INDEX IF NOT EXISTS idx_builds_azdo ON builds(azdo_build_id);
             CREATE INDEX IF NOT EXISTS idx_builds_repo ON builds(repository);
+            CREATE INDEX IF NOT EXISTS idx_builds_collection ON builds(azdo_failure_state, helix_failure_state);
             CREATE INDEX IF NOT EXISTS idx_test_failures_build ON test_failures(build_id);
+            CREATE INDEX IF NOT EXISTS idx_helix_work_items_build ON helix_work_items(build_id);
             CREATE INDEX IF NOT EXISTS idx_triage_requests_status ON triage_requests(status);
             CREATE INDEX IF NOT EXISTS idx_fix_requests_status ON fix_requests(status);
             CREATE INDEX IF NOT EXISTS idx_flaky_tests_name ON flaky_tests(test_name, repository);
@@ -110,6 +131,45 @@ public sealed class MonitorDatabase : IDisposable
     }
 
     /// <summary>
+    /// Returns true if any test failures exist for a build identified by its AzDO build ID.
+    /// </summary>
+    public bool HasTestFailuresForAzdoBuild(int azdoBuildId)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT COUNT(1) FROM test_failures tf
+            JOIN builds b ON b.id = tf.build_id
+            WHERE b.azdo_build_id = @id
+            """;
+        cmd.Parameters.AddWithValue("@id", azdoBuildId);
+        return (long)cmd.ExecuteScalar()! > 0;
+    }
+
+    /// <summary>
+    /// Gets the internal row ID for a build by its AzDO build ID.
+    /// </summary>
+    public long? GetBuildRowId(int azdoBuildId)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "SELECT id FROM builds WHERE azdo_build_id = @id";
+        cmd.Parameters.AddWithValue("@id", azdoBuildId);
+        var result = cmd.ExecuteScalar();
+        return result is long id ? id : null;
+    }
+
+    /// <summary>
+    /// Updates the has_test_failures flag on a build.
+    /// </summary>
+    public void UpdateHasTestFailures(long buildId, bool hasTestFailures)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "UPDATE builds SET has_test_failures = @val WHERE id = @id";
+        cmd.Parameters.AddWithValue("@val", hasTestFailures ? 1 : 0);
+        cmd.Parameters.AddWithValue("@id", buildId);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
     /// Records a build and returns its database row ID.
     /// </summary>
     public long InsertBuild(
@@ -123,10 +183,14 @@ public sealed class MonitorDatabase : IDisposable
         DateTime? finishTime,
         bool hasTestFailures)
     {
+        // Succeeded builds don't need failure collection
+        var azdoState = result == "succeeded" ? "collected" : "pending";
+        var helixState = result == "succeeded" ? "collected" : "pending";
+
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO builds (azdo_build_id, repository, build_number, source_branch, definition_name, status, result, finish_time, has_test_failures)
-            VALUES (@azdoBuildId, @repository, @buildNumber, @sourceBranch, @definitionName, @status, @result, @finishTime, @hasTestFailures);
+            INSERT INTO builds (azdo_build_id, repository, build_number, source_branch, definition_name, status, result, finish_time, has_test_failures, azdo_failure_state, helix_failure_state)
+            VALUES (@azdoBuildId, @repository, @buildNumber, @sourceBranch, @definitionName, @status, @result, @finishTime, @hasTestFailures, @azdoState, @helixState);
             SELECT last_insert_rowid();
             """;
         cmd.Parameters.AddWithValue("@azdoBuildId", azdoBuildId);
@@ -138,23 +202,26 @@ public sealed class MonitorDatabase : IDisposable
         cmd.Parameters.AddWithValue("@result", (object?)result ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@finishTime", finishTime?.ToString("o") ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("@hasTestFailures", hasTestFailures ? 1 : 0);
+        cmd.Parameters.AddWithValue("@azdoState", azdoState);
+        cmd.Parameters.AddWithValue("@helixState", helixState);
         return (long)cmd.ExecuteScalar()!;
     }
 
     /// <summary>
     /// Records a test failure linked to a build.
     /// </summary>
-    public void InsertTestFailure(long buildId, string testName, string outcome, string? errorMessage)
+    public void InsertTestFailure(long buildId, string testName, string outcome, string? errorMessage, string? stackTrace = null)
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO test_failures (build_id, test_name, outcome, error_message)
-            VALUES (@buildId, @testName, @outcome, @errorMessage);
+            INSERT INTO test_failures (build_id, test_name, outcome, error_message, stack_trace)
+            VALUES (@buildId, @testName, @outcome, @errorMessage, @stackTrace);
             """;
         cmd.Parameters.AddWithValue("@buildId", buildId);
         cmd.Parameters.AddWithValue("@testName", testName);
         cmd.Parameters.AddWithValue("@outcome", outcome);
         cmd.Parameters.AddWithValue("@errorMessage", (object?)errorMessage ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@stackTrace", (object?)stackTrace ?? DBNull.Value);
     }
 
     /// <summary>
@@ -360,7 +427,7 @@ public sealed class MonitorDatabase : IDisposable
     }
 
     /// <summary>
-    /// Gets recent builds with their test failure counts.
+    /// Gets recent builds with their test failure counts and collection state.
     /// </summary>
     public List<BuildRecord> GetRecentBuilds(int limit = 50)
     {
@@ -368,6 +435,7 @@ public sealed class MonitorDatabase : IDisposable
         cmd.CommandText = """
             SELECT b.azdo_build_id, b.repository, b.build_number, b.source_branch,
                    b.definition_name, b.status, b.result, b.finish_time, b.has_test_failures,
+                   b.azdo_failure_state, b.helix_failure_state,
                    COUNT(tf.id) as failure_count
             FROM builds b
             LEFT JOIN test_failures tf ON tf.build_id = b.id
@@ -392,7 +460,200 @@ public sealed class MonitorDatabase : IDisposable
                 Result = reader.IsDBNull(6) ? null : reader.GetString(6),
                 FinishTime = reader.IsDBNull(7) ? null : reader.GetString(7),
                 HasTestFailures = reader.GetInt32(8) != 0,
-                TestFailureCount = reader.GetInt32(9),
+                AzdoFailureState = reader.GetString(9),
+                HelixFailureState = reader.GetString(10),
+                TestFailureCount = reader.GetInt32(11),
+            });
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Gets builds that need failure data collection (state = pending, not recently attempted).
+    /// </summary>
+    public List<CollectionTarget> GetPendingCollectionTargets(int limit = 4)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, azdo_build_id, repository, azdo_failure_state, helix_failure_state
+            FROM builds
+            WHERE (azdo_failure_state = 'pending' OR helix_failure_state = 'pending')
+              AND (last_collection_attempt IS NULL 
+                   OR datetime(last_collection_attempt, '+30 seconds') < datetime('now'))
+            ORDER BY created_at DESC
+            LIMIT @limit;
+            """;
+        cmd.Parameters.AddWithValue("@limit", limit);
+
+        var list = new List<CollectionTarget>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            list.Add(new CollectionTarget
+            {
+                BuildId = reader.GetInt64(0),
+                AzdoBuildId = reader.GetInt32(1),
+                Repository = reader.GetString(2),
+                AzdoFailureState = reader.GetString(3),
+                HelixFailureState = reader.GetString(4),
+            });
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Marks AzDO test failure collection as successful for a build.
+    /// </summary>
+    public void SetAzdoCollected(long buildId)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            UPDATE builds SET azdo_failure_state = 'collected', collection_failures = 0
+            WHERE id = @id;
+            """;
+        cmd.Parameters.AddWithValue("@id", buildId);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Marks Helix work item collection as successful for a build.
+    /// </summary>
+    public void SetHelixCollected(long buildId)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            UPDATE builds SET helix_failure_state = 'collected', collection_failures = 0
+            WHERE id = @id;
+            """;
+        cmd.Parameters.AddWithValue("@id", buildId);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Records a collection failure. If consecutive failures reach the max, marks the
+    /// appropriate state as 'failed'.
+    /// </summary>
+    public void RecordCollectionFailure(long buildId, int maxFailures = 3)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            UPDATE builds SET
+                collection_failures = collection_failures + 1,
+                last_collection_attempt = datetime('now'),
+                azdo_failure_state = CASE 
+                    WHEN azdo_failure_state = 'pending' AND collection_failures + 1 >= @max THEN 'failed'
+                    ELSE azdo_failure_state END,
+                helix_failure_state = CASE 
+                    WHEN helix_failure_state = 'pending' AND collection_failures + 1 >= @max THEN 'failed'
+                    ELSE helix_failure_state END
+            WHERE id = @id;
+            """;
+        cmd.Parameters.AddWithValue("@id", buildId);
+        cmd.Parameters.AddWithValue("@max", maxFailures);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Resets a build's collection state from 'failed' back to 'pending' for retry.
+    /// </summary>
+    public bool ResetCollectionState(int azdoBuildId)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            UPDATE builds SET
+                azdo_failure_state = CASE WHEN azdo_failure_state = 'failed' THEN 'pending' ELSE azdo_failure_state END,
+                helix_failure_state = CASE WHEN helix_failure_state = 'failed' THEN 'pending' ELSE helix_failure_state END,
+                collection_failures = 0,
+                last_collection_attempt = NULL
+            WHERE azdo_build_id = @id
+              AND (azdo_failure_state = 'failed' OR helix_failure_state = 'failed');
+            """;
+        cmd.Parameters.AddWithValue("@id", azdoBuildId);
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
+    /// <summary>
+    /// Inserts a Helix work item record.
+    /// </summary>
+    public void InsertHelixWorkItem(long buildId, string friendlyName, int exitCode, string machineName,
+        string queueName, string consoleUri, long jobId, long workItemId, string status)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO helix_work_items (build_id, friendly_name, exit_code, machine_name, queue_name, console_uri, job_id, work_item_id, status)
+            VALUES (@buildId, @friendlyName, @exitCode, @machineName, @queueName, @consoleUri, @jobId, @workItemId, @status);
+            """;
+        cmd.Parameters.AddWithValue("@buildId", buildId);
+        cmd.Parameters.AddWithValue("@friendlyName", friendlyName);
+        cmd.Parameters.AddWithValue("@exitCode", exitCode);
+        cmd.Parameters.AddWithValue("@machineName", machineName);
+        cmd.Parameters.AddWithValue("@queueName", queueName);
+        cmd.Parameters.AddWithValue("@consoleUri", consoleUri);
+        cmd.Parameters.AddWithValue("@jobId", jobId);
+        cmd.Parameters.AddWithValue("@workItemId", workItemId);
+        cmd.Parameters.AddWithValue("@status", status);
+    }
+
+    /// <summary>
+    /// Gets test failures for a build by its AzDO build ID.
+    /// </summary>
+    public List<TestFailureRecord> GetTestFailuresForBuild(int azdoBuildId)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT tf.test_name, tf.outcome, tf.error_message, tf.stack_trace
+            FROM test_failures tf
+            JOIN builds b ON b.id = tf.build_id
+            WHERE b.azdo_build_id = @id
+            ORDER BY tf.test_name;
+            """;
+        cmd.Parameters.AddWithValue("@id", azdoBuildId);
+
+        var list = new List<TestFailureRecord>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            list.Add(new TestFailureRecord
+            {
+                TestName = reader.GetString(0),
+                Outcome = reader.GetString(1),
+                ErrorMessage = reader.IsDBNull(2) ? null : reader.GetString(2),
+                StackTrace = reader.IsDBNull(3) ? null : reader.GetString(3),
+            });
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Gets helix work items for a build by its AzDO build ID.
+    /// </summary>
+    public List<HelixWorkItemRecord> GetHelixWorkItemsForBuild(int azdoBuildId)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT h.friendly_name, h.exit_code, h.machine_name, h.queue_name,
+                   h.console_uri, h.job_id, h.work_item_id, h.status
+            FROM helix_work_items h
+            JOIN builds b ON b.id = h.build_id
+            WHERE b.azdo_build_id = @id
+            ORDER BY h.friendly_name;
+            """;
+        cmd.Parameters.AddWithValue("@id", azdoBuildId);
+
+        var list = new List<HelixWorkItemRecord>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            list.Add(new HelixWorkItemRecord
+            {
+                FriendlyName = reader.GetString(0),
+                ExitCode = reader.GetInt32(1),
+                MachineName = reader.GetString(2),
+                QueueName = reader.GetString(3),
+                ConsoleUri = reader.GetString(4),
+                JobId = reader.GetInt64(5),
+                WorkItemId = reader.GetInt64(6),
+                Status = reader.GetString(7),
             });
         }
         return list;
@@ -432,5 +693,36 @@ public sealed class BuildRecord
     public string? Result { get; init; }
     public string? FinishTime { get; init; }
     public bool HasTestFailures { get; init; }
+    public required string AzdoFailureState { get; init; }
+    public required string HelixFailureState { get; init; }
     public int TestFailureCount { get; init; }
+}
+
+public sealed class CollectionTarget
+{
+    public required long BuildId { get; init; }
+    public required int AzdoBuildId { get; init; }
+    public required string Repository { get; init; }
+    public required string AzdoFailureState { get; init; }
+    public required string HelixFailureState { get; init; }
+}
+
+public sealed class TestFailureRecord
+{
+    public required string TestName { get; init; }
+    public required string Outcome { get; init; }
+    public string? ErrorMessage { get; init; }
+    public string? StackTrace { get; init; }
+}
+
+public sealed class HelixWorkItemRecord
+{
+    public required string FriendlyName { get; init; }
+    public required int ExitCode { get; init; }
+    public required string MachineName { get; init; }
+    public required string QueueName { get; init; }
+    public required string ConsoleUri { get; init; }
+    public required long JobId { get; init; }
+    public required long WorkItemId { get; init; }
+    public required string Status { get; init; }
 }

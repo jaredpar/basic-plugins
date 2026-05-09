@@ -3,76 +3,72 @@ using Spectre.Console;
 namespace Pipeline.Monitor.Commands;
 
 /// <summary>
-/// Live-tails the polling agent output. Press Ctrl+C to return to the prompt.
+/// Live-tails the shared monitor log. Press q or Esc to return to the prompt.
 /// </summary>
 public static class WatchCommand
 {
-    public static async Task ExecuteAsync(PollingAgent agent, CancellationToken appToken)
+    public static async Task ExecuteAsync(MonitorLog log, CancellationToken appToken)
     {
-        AnsiConsole.MarkupLine("[dim]Watching polling agent output. Press Ctrl+C to stop.[/]");
+        AnsiConsole.MarkupLine("[dim]Watching monitor log. Press q or Esc to stop.[/]");
         AnsiConsole.WriteLine();
 
-        // Print any existing events first
-        foreach (var existing in agent.Events)
+        // Print any existing entries first
+        foreach (var existing in log.Entries)
         {
-            PrintEvent(existing);
+            PrintEntry(existing);
         }
 
-        // Subscribe to new events
+        // Subscribe to new entries
         using var watchCts = CancellationTokenSource.CreateLinkedTokenSource(appToken);
-        var token = watchCts.Token;
 
-        void OnEvent(AgentEvent evt) => PrintEvent(evt);
-        agent.EventReceived += OnEvent;
+        void OnEntry(LogEntry entry) => PrintEntry(entry);
+        log.EntryAdded += OnEntry;
 
         try
         {
-            // Wait until Ctrl+C is pressed (caught as OperationCanceledException)
-            Console.CancelKeyPress += OnCancel;
-            void OnCancel(object? sender, ConsoleCancelEventArgs e)
+            // Poll for key presses while watching
+            while (!watchCts.Token.IsCancellationRequested)
             {
-                e.Cancel = true; // Don't terminate the process
-                watchCts.Cancel();
-            }
+                if (Console.KeyAvailable)
+                {
+                    var key = Console.ReadKey(true);
+                    if (key.Key is ConsoleKey.Q or ConsoleKey.Escape)
+                        break;
+                }
 
-            try
-            {
-                await Task.Delay(Timeout.Infinite, token);
-            }
-            catch (OperationCanceledException) when (!appToken.IsCancellationRequested)
-            {
-                // Ctrl+C pressed — return to prompt
-            }
-            finally
-            {
-                Console.CancelKeyPress -= OnCancel;
+                try
+                {
+                    await Task.Delay(100, watchCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
             }
         }
         finally
         {
-            agent.EventReceived -= OnEvent;
+            log.EntryAdded -= OnEntry;
         }
 
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[dim]Stopped watching.[/]");
     }
 
-    private static void PrintEvent(AgentEvent evt)
+    private static void PrintEntry(LogEntry entry)
     {
-        var timestamp = evt.Timestamp.ToString("HH:mm:ss");
-        var message = evt.Message.EscapeMarkup();
+        var timestamp = entry.Timestamp.ToString("HH:mm:ss");
+        var source = entry.Source.EscapeMarkup();
+        var message = entry.Message.EscapeMarkup();
 
-        if (message.StartsWith("[tool]"))
+        var (levelColor, sourceColor) = entry.Level switch
         {
-            AnsiConsole.MarkupLine($"[dim]{timestamp}[/] [cyan]{message}[/]");
-        }
-        else if (message.StartsWith("[error]"))
-        {
-            AnsiConsole.MarkupLine($"[dim]{timestamp}[/] [red]{message}[/]");
-        }
-        else
-        {
-            AnsiConsole.MarkupLine($"[dim]{timestamp}[/] {message}");
-        }
+            LogLevel.Error => ("red", "red"),
+            LogLevel.Warn => ("yellow", "yellow"),
+            LogLevel.Tool => ("cyan", "cyan"),
+            _ => ("white", "blue"),
+        };
+
+        AnsiConsole.MarkupLine($"[dim]{timestamp}[/] [{sourceColor}]{source}[/] [{levelColor}]{message}[/]");
     }
 }

@@ -40,6 +40,7 @@ Individual test failure records linked to builds.
 | `test_name` | TEXT | Fully qualified test name (from AzDO `testCaseTitle`) |
 | `outcome` | TEXT | Test outcome (e.g., `Failed`, `Aborted`) |
 | `error_message` | TEXT | Error message from the test failure (nullable) |
+| `stack_trace` | TEXT | Stack trace from the test failure (nullable) |
 | `created_at` | TEXT | When this record was created |
 
 ### `triage_requests`
