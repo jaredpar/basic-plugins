@@ -20,33 +20,81 @@ public static class BuildsCommand
                 return;
             }
 
-            var choices = new List<string>();
-            var buildMap = new Dictionary<string, BuildRecord>();
-
+            var labels = new List<string>();
             foreach (var build in builds)
             {
                 var branch = FormatBranch(build.SourceBranch);
                 var result = build.Result ?? "—";
-                var label = $"{build.AzdoBuildId} | {build.Repository} | {branch} | {result} | {build.TestFailureCount} failures"
-                    .EscapeMarkup();
-                choices.Add(label);
-                buildMap[label] = build;
+                labels.Add($"{build.AzdoBuildId} | {build.Repository} | {branch} | {result} | {build.TestFailureCount} failures");
             }
 
-            var backLabel = "← Back";
-            choices.Add(backLabel);
-
-            var selection = AnsiConsole.Prompt(
-                new SelectionPrompt<string>()
-                    .Title("[bold]Select a build to view details:[/]")
-                    .PageSize(20)
-                    .AddChoices(choices));
-
-            if (selection == backLabel)
+            var index = InteractiveMenu(labels, "Select a build (↑↓ navigate, Enter select, Esc back):");
+            if (index < 0)
                 return;
 
-            var selected = buildMap[selection];
-            ShowBuildDetail(db, selected);
+            ShowBuildDetail(db, builds[index]);
+        }
+    }
+
+    /// <summary>
+    /// Renders a simple interactive menu with arrow key navigation.
+    /// Returns the selected index, or -1 if Escape/q was pressed.
+    /// </summary>
+    private static int InteractiveMenu(List<string> items, string title)
+    {
+        int selected = 0;
+        int pageSize = Math.Min(20, Console.WindowHeight - 4);
+
+        // Hide cursor during menu
+        Console.CursorVisible = false;
+        try
+        {
+            while (true)
+            {
+                AnsiConsole.Clear();
+                AnsiConsole.MarkupLine($"[bold]{title.EscapeMarkup()}[/]");
+                AnsiConsole.WriteLine();
+
+                // Calculate visible window
+                int start = Math.Max(0, selected - pageSize / 2);
+                int end = Math.Min(items.Count, start + pageSize);
+                if (end - start < pageSize)
+                    start = Math.Max(0, end - pageSize);
+
+                if (start > 0)
+                    AnsiConsole.MarkupLine("[dim]  ↑ more[/]");
+
+                for (int i = start; i < end; i++)
+                {
+                    if (i == selected)
+                        AnsiConsole.MarkupLine($"[blue]> {items[i].EscapeMarkup()}[/]");
+                    else
+                        AnsiConsole.MarkupLine($"  {items[i].EscapeMarkup()}");
+                }
+
+                if (end < items.Count)
+                    AnsiConsole.MarkupLine("[dim]  ↓ more[/]");
+
+                var key = Console.ReadKey(true);
+                switch (key.Key)
+                {
+                    case ConsoleKey.UpArrow:
+                        selected = Math.Max(0, selected - 1);
+                        break;
+                    case ConsoleKey.DownArrow:
+                        selected = Math.Min(items.Count - 1, selected + 1);
+                        break;
+                    case ConsoleKey.Enter:
+                        return selected;
+                    case ConsoleKey.Escape:
+                    case ConsoleKey.Q:
+                        return -1;
+                }
+            }
+        }
+        finally
+        {
+            Console.CursorVisible = true;
         }
     }
 
@@ -127,6 +175,67 @@ public static class BuildsCommand
             AnsiConsole.WriteLine();
         }
 
+        // Timeline — failed jobs and issues
+        var timeline = db.GetTimelineData(build.AzdoBuildId);
+        if (timeline is not null && (timeline.FailedJobs.Count > 0 || timeline.Issues.Count > 0))
+        {
+            var timelineRule = new Rule($"[bold]Timeline ({timeline.FailedJobs.Count} failed job(s), {timeline.Issues.Count} issue(s))[/]");
+            timelineRule.Style = Style.Parse("yellow");
+            AnsiConsole.Write(timelineRule);
+
+            if (timeline.FailedJobs.Count > 0)
+            {
+                var jobTable = new Table();
+                jobTable.Border(TableBorder.Simple);
+                jobTable.AddColumn("Job");
+                jobTable.AddColumn("Result");
+                jobTable.AddColumn("Worker");
+
+                foreach (var job in timeline.FailedJobs)
+                {
+                    var resultMarkup = job.Result switch
+                    {
+                        "failed" => "[red]failed[/]",
+                        "canceled" => "[dim]canceled[/]",
+                        _ => job.Result.EscapeMarkup(),
+                    };
+                    jobTable.AddRow(
+                        job.Name.EscapeMarkup(),
+                        resultMarkup,
+                        job.WorkerName?.EscapeMarkup() ?? "[dim]—[/]");
+                }
+
+                AnsiConsole.Write(jobTable);
+                AnsiConsole.WriteLine();
+            }
+
+            var errors = timeline.Issues.Where(i => i.Type == "error").ToList();
+            if (errors.Count > 0)
+            {
+                AnsiConsole.MarkupLine($"[red]Errors ({errors.Count}):[/]");
+                foreach (var issue in errors)
+                {
+                    var msg = Truncate(issue.Message, 200);
+                    AnsiConsole.MarkupLine($"  [red]✗[/] {msg.EscapeMarkup()}");
+                }
+                AnsiConsole.WriteLine();
+            }
+
+            var warnings = timeline.Issues.Where(i => i.Type == "warning").ToList();
+            if (warnings.Count > 0)
+            {
+                AnsiConsole.MarkupLine($"[yellow]Warnings ({warnings.Count}):[/]");
+                foreach (var issue in warnings.Take(10))
+                {
+                    var msg = Truncate(issue.Message, 200);
+                    AnsiConsole.MarkupLine($"  [yellow]![/] {msg.EscapeMarkup()}");
+                }
+                if (warnings.Count > 10)
+                    AnsiConsole.MarkupLine($"  [dim]... and {warnings.Count - 10} more[/]");
+                AnsiConsole.WriteLine();
+            }
+        }
+
         // Helix work items
         var helixItems = db.GetHelixWorkItemsForBuild(build.AzdoBuildId);
         if (helixItems.Count > 0)
@@ -168,7 +277,7 @@ public static class BuildsCommand
         }
 
         // Wait for user before returning to list
-        AnsiConsole.MarkupLine("[dim]Press q or Esc to return to build list...[/]");
+        AnsiConsole.MarkupLine("[dim]Press Esc to return...[/]");
         while (true)
         {
             var key = Console.ReadKey(true);

@@ -9,7 +9,7 @@ public static class WatchCommand
 {
     public static async Task ExecuteAsync(MonitorLog log, CancellationToken appToken)
     {
-        AnsiConsole.MarkupLine("[dim]Watching monitor log. Press q or Esc to stop.[/]");
+        AnsiConsole.MarkupLine("[dim]Watching monitor log. Press Esc to stop.[/]");
         AnsiConsole.WriteLine();
 
         // Print any existing entries first

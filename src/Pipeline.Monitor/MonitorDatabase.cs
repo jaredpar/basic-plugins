@@ -43,6 +43,7 @@ public sealed class MonitorDatabase : IDisposable
                 helix_failure_state TEXT NOT NULL DEFAULT 'pending',
                 collection_failures INTEGER NOT NULL DEFAULT 0,
                 last_collection_attempt TEXT,
+                timeline_json TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
 
@@ -167,6 +168,34 @@ public sealed class MonitorDatabase : IDisposable
         cmd.Parameters.AddWithValue("@val", hasTestFailures ? 1 : 0);
         cmd.Parameters.AddWithValue("@id", buildId);
         cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Stores the timeline summary JSON blob for a build.
+    /// </summary>
+    public void SetTimelineData(long buildId, string timelineJson)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "UPDATE builds SET timeline_json = @json WHERE id = @id";
+        cmd.Parameters.AddWithValue("@json", timelineJson);
+        cmd.Parameters.AddWithValue("@id", buildId);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Gets the timeline summary for a build by AzDO build ID. Returns null if not yet collected.
+    /// </summary>
+    public TimelineSummary? GetTimelineData(int azdoBuildId)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "SELECT timeline_json FROM builds WHERE azdo_build_id = @id";
+        cmd.Parameters.AddWithValue("@id", azdoBuildId);
+        var result = cmd.ExecuteScalar();
+        if (result is string json)
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<TimelineSummary>(json);
+        }
+        return null;
     }
 
     /// <summary>

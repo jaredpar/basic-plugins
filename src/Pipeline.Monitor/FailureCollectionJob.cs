@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Pipeline.Core;
 
 namespace Pipeline.Monitor;
@@ -104,12 +105,13 @@ public sealed class FailureCollectionJob
     }
 
     /// <summary>
-    /// Fetches AzDO test failures for a build. Returns true on success.
+    /// Fetches AzDO test failures and timeline data for a build. Returns true on success.
     /// </summary>
     private async Task<bool> CollectAzdoTestFailuresAsync(CollectionTarget target)
     {
         try
         {
+            // Collect test failures
             var failures = await _azdoClient.GetTestFailuresAsync(target.AzdoBuildId);
 
             foreach (var f in failures)
@@ -125,6 +127,51 @@ public sealed class FailureCollectionJob
             else
             {
                 _log.Info(Source, $"Build {target.AzdoBuildId}: no AzDO test failures");
+            }
+
+            // Collect timeline data (failed jobs + error/warning issues)
+            try
+            {
+                var timeline = await _azdoClient.GetTimelineAsync(target.AzdoBuildId);
+
+                var failedJobs = timeline.Records
+                    .Where(r => r.RecordType == "Job" && r.Result is not null and not "succeeded")
+                    .Select(r => new TimelineJobEntry
+                    {
+                        Name = r.Name,
+                        Result = r.Result!,
+                        WorkerName = r.WorkerName,
+                    })
+                    .ToList();
+
+                var issues = timeline.Records
+                    .SelectMany(r => r.Issues)
+                    .Where(i => i.Type is "error" or "warning")
+                    .Select(i => new TimelineIssueEntry
+                    {
+                        Type = i.Type,
+                        Message = i.Message,
+                        Category = i.Category,
+                    })
+                    .ToList();
+
+                var summary = new TimelineSummary
+                {
+                    FailedJobs = failedJobs,
+                    Issues = issues,
+                };
+
+                _db.SetTimelineData(target.BuildId, JsonSerializer.Serialize(summary));
+
+                if (failedJobs.Count > 0 || issues.Count > 0)
+                {
+                    _log.Info(Source, $"Build {target.AzdoBuildId}: timeline — {failedJobs.Count} failed job(s), {issues.Count} issue(s)");
+                }
+            }
+            catch (Exception ex)
+            {
+                // Timeline is supplementary — log but don't fail the whole AzDO collection
+                _log.Warn(Source, $"Build {target.AzdoBuildId}: timeline collection failed — {ex.Message}");
             }
 
             _db.SetAzdoCollected(target.BuildId);

@@ -182,64 +182,49 @@ public sealed class HelixClient
 
     private async Task<List<HelixWorkItem>> QueryHelixWorkItem(string query)
     {
-        try
-        {
-            using var kustoQueryClient = KustoClientFactory.CreateCslQueryProvider(KustoConnectionStringBuilder);
-            var reader = kustoQueryClient.ExecuteQuery(query);
-            var list = new List<HelixWorkItem>();
+        using var kustoQueryClient = KustoClientFactory.CreateCslQueryProvider(KustoConnectionStringBuilder);
+        var reader = kustoQueryClient.ExecuteQuery(query);
+        var list = new List<HelixWorkItem>();
 
-            // Read and print results
-            while (reader.Read())
+        while (reader.Read())
+        {
+            var friendlyName = reader.GetString(0);
+            var executionTime = TimeSpan.FromSeconds(reader.GetDouble(1));
+            var queuedTime = TimeSpan.FromSeconds(reader.GetDouble(2));
+            var azdoBuildId = reader.GetInt32(3);
+            var azdoPhaseName = reader.GetString(4);
+            var azdoAttempt = int.Parse(reader.GetString(5));
+            var machineName = reader.GetString(6);
+            var exitCode = reader.GetInt32(7);
+            var consoleUri = reader.GetString(8);
+            var jobId = reader.GetInt64(9);
+            var jobName = reader.GetString(10);
+            var queueName = reader.GetString(11);
+            var finished = reader.GetDateTime(12);
+            var workItemId = reader.GetInt64(13);
+            var status = reader.GetString(14);
+
+            list.Add(new HelixWorkItem
             {
-                var friendlyName = reader.GetString(0);
-                var executionTime = TimeSpan.FromSeconds(reader.GetDouble(1));
-                var queuedTime = TimeSpan.FromSeconds(reader.GetDouble(2));
-                var azdoBuildId = reader.GetInt32(3);
-                var azdoPhaseName = reader.GetString(4);
-                var azdoAttempt = int.Parse(reader.GetString(5));
-                var machineName = reader.GetString(6);
-                var exitCode = reader.GetInt32(7);
-                var consoleUri = reader.GetString(8);
-                var jobId = reader.GetInt64(9);
-                var jobName = reader.GetString(10);
-                var queueName = reader.GetString(11);
-                var finished = reader.GetDateTime(12);
-                var workItemId = reader.GetInt64(13);
-                var status = reader.GetString(14);
+                FriendlyName = friendlyName,
+                ExecutionTime = (int)executionTime.TotalSeconds,
+                QueuedTime = (int)queuedTime.TotalSeconds,
+                AzdoBuildId = azdoBuildId,
+                AzdoPhaseName = azdoPhaseName,
+                AzdoAttempt = azdoAttempt,
+                MachineName = machineName,
+                ExitCode = exitCode,
+                ConsoleUri = consoleUri,
+                JobId = jobId,
+                JobName = jobName,
+                QueueName = queueName,
+                Finished = finished,
+                WorkItemId = workItemId,
+                Status = status
+            });
+        }
 
-                list.Add(new HelixWorkItem
-                {
-                    FriendlyName = friendlyName,
-                    ExecutionTime = (int)executionTime.TotalSeconds,
-                    QueuedTime = (int)queuedTime.TotalSeconds,
-                    AzdoBuildId = azdoBuildId,
-                    AzdoPhaseName = azdoPhaseName,
-                    AzdoAttempt = azdoAttempt,
-                    MachineName = machineName,
-                    ExitCode = exitCode,
-                    ConsoleUri = consoleUri,
-                    JobId = jobId,
-                    JobName = jobName,
-                    QueueName = queueName,
-                    Finished = finished,
-                    WorkItemId = workItemId,
-                    Status = status
-                });
-            }
-
-            return list;
-        }
-        catch (KustoRequestException ex) when (ex.ErrorReason == "Unauthorized")
-        {
-            Console.WriteLine("Error: access denied. You are not authorized to query this Kusto database. Ensure your account has been granted access.");
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine(ex.Message);
-            Console.WriteLine("Error reading Kusto, are you connected to the VPN?");
-            throw;
-        }
+        return list;
     }
 
     public async Task<HelixWorkItemConsole> GetConsoleAsync(HelixWorkItem workItem)
@@ -289,46 +274,32 @@ public sealed class HelixClient
             | project JobId, WorkItemId, FileName, Uri, SizeBytesLong
             """;
 
-        try
-        {
-            using var kustoQueryClient = KustoClientFactory.CreateCslQueryProvider(KustoConnectionStringBuilder);
-            var reader = kustoQueryClient.ExecuteQuery(query);
-            var list = new List<HelixWorkItemFile>();
+        using var kustoQueryClient = KustoClientFactory.CreateCslQueryProvider(KustoConnectionStringBuilder);
+        var reader = kustoQueryClient.ExecuteQuery(query);
+        var list = new List<HelixWorkItemFile>();
 
-            while (reader.Read())
+        while (reader.Read())
+        {
+            var jobId = reader.GetInt64(0);
+            var workItemId = reader.GetInt64(1);
+            var fileName = reader.GetString(2);
+            var uri = reader.GetString(3);
+            var sizeBytes = reader.GetInt64(4);
+
+            var jobName = jobNameMap.GetValueOrDefault(workItemId, "unknown");
+
+            list.Add(new HelixWorkItemFile
             {
-                var jobId = reader.GetInt64(0);
-                var workItemId = reader.GetInt64(1);
-                var fileName = reader.GetString(2);
-                var uri = reader.GetString(3);
-                var sizeBytes = reader.GetInt64(4);
-
-                var jobName = jobNameMap.GetValueOrDefault(workItemId, "unknown");
-
-                list.Add(new HelixWorkItemFile
-                {
-                    JobId = jobId,
-                    WorkItemId = workItemId,
-                    JobName = jobName,
-                    FileName = fileName,
-                    Uri = uri,
-                    SizeBytes = sizeBytes
-                });
-            }
-
-            return list;
+                JobId = jobId,
+                WorkItemId = workItemId,
+                JobName = jobName,
+                FileName = fileName,
+                Uri = uri,
+                SizeBytes = sizeBytes
+            });
         }
-        catch (KustoRequestException ex) when (ex.ErrorReason == "Unauthorized")
-        {
-            Console.WriteLine("Error: access denied. You are not authorized to query this Kusto database. Ensure your account has been granted access.");
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine(ex.Message);
-            Console.WriteLine("Error reading Kusto, are you connected to the VPN?");
-            throw;
-        }
+
+        return list;
     }
 
     public static async Task DownloadFilesAsync(List<HelixWorkItemFile> files, string outputDir)
