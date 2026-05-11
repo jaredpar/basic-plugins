@@ -105,6 +105,9 @@ public class AzdoTestFailure
     [JsonPropertyName("stackTrace")]
     public string? StackTrace { get; init; }
 
+    [JsonPropertyName("comment")]
+    public string? Comment { get; init; }
+
     [JsonPropertyName("testRunId")]
     public int TestRunId { get; init; }
 
@@ -272,6 +275,7 @@ public sealed class AzdoClient
                     Outcome = r.Outcome,
                     ErrorMessage = r.ErrorMessage,
                     StackTrace = r.StackTrace,
+                    Comment = r.Comment,
                     TestRunId = run.Id,
                     TestRunName = run.Name,
                 });
@@ -486,6 +490,9 @@ public sealed class AzdoClient
 
         [JsonPropertyName("stackTrace")]
         public string? StackTrace { get; init; }
+
+        [JsonPropertyName("comment")]
+        public string? Comment { get; init; }
     }
 
     private class AzdoTimelineRaw
