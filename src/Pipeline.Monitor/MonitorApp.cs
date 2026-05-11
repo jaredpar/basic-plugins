@@ -1,4 +1,5 @@
 using GitHub.Copilot.SDK;
+using Microsoft.Extensions.AI;
 using Pipeline.Core;
 using Spectre.Console;
 
@@ -16,6 +17,7 @@ public sealed class MonitorApp : IAsyncDisposable
     private readonly HelixClient _helixClient;
     private readonly CopilotClient _client;
     private readonly MonitorLog _log;
+    private readonly List<AIFunction> _pipelineTools;
     private readonly PollingAgent _pollingAgent;
     private readonly FailureCollectionJob _collectionJob;
     private readonly FlakyAnalysisJob _flakyAnalysisJob;
@@ -30,11 +32,12 @@ public sealed class MonitorApp : IAsyncDisposable
         var credential = PipelineUtils.CreateCredential();
         _azdoClient = AzdoClient.Create(credential);
         _helixClient = HelixClient.Create(credential);
+        _pipelineTools = SessionConfigHelper.CreatePipelineTools(_azdoClient, _helixClient);
 
         _client = new CopilotClient();
-        _pollingAgent = new PollingAgent(_client, _db, config, _log);
+        _pollingAgent = new PollingAgent(_client, _db, config, _log, _pipelineTools);
         _collectionJob = new FailureCollectionJob(_db, _azdoClient, _helixClient, _log);
-        _flakyAnalysisJob = new FlakyAnalysisJob(_client, _db, _log);
+        _flakyAnalysisJob = new FlakyAnalysisJob(_client, _db, _log, _pipelineTools);
     }
 
     public async Task RunAsync()
@@ -82,11 +85,15 @@ public sealed class MonitorApp : IAsyncDisposable
                     break;
 
                 case "add":
-                    await Commands.AddCommand.ExecuteAsync(_client, _db);
+                    await Commands.AddCommand.ExecuteAsync(_client, _db, _pipelineTools);
                     break;
 
                 case "retry":
-                    await Commands.RetryCommand.ExecuteAsync(_client, _db);
+                    await Commands.RetryCommand.ExecuteAsync(_client, _db, _pipelineTools);
+                    break;
+
+                case "console":
+                    await Commands.ConsoleCommand.ExecuteAsync(_client, _db, _pipelineTools);
                     break;
 
                 case "flaky":
@@ -121,6 +128,7 @@ public sealed class MonitorApp : IAsyncDisposable
         table.AddRow("[bold]builds[/]", "Show builds in the database");
         table.AddRow("[bold]flaky[/]", "Review flaky test determinations");
         table.AddRow("[bold]add[/]", "Import builds from AzDO using a natural language prompt");
+        table.AddRow("[bold]console[/]", "Start an interactive chat session with the LLM");
         table.AddRow("[bold]retry[/]", "Retry failure collection for builds that previously failed");
         table.AddRow("[bold]help[/]", "Show this help message");
         table.AddRow("[bold]quit[/]", "Shut down the monitor");

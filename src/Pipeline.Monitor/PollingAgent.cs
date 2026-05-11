@@ -1,5 +1,3 @@
-using System.ComponentModel;
-using System.Text.Json;
 using GitHub.Copilot.SDK;
 using Microsoft.Extensions.AI;
 
@@ -16,6 +14,7 @@ public sealed class PollingAgent : IAsyncDisposable
     private readonly MonitorDatabase _db;
     private readonly MonitorConfig _config;
     private readonly MonitorLog _log;
+    private readonly List<AIFunction> _pipelineTools;
     private const string Source = "poller";
 
     private CopilotSession? _session;
@@ -25,12 +24,14 @@ public sealed class PollingAgent : IAsyncDisposable
         CopilotClient client,
         MonitorDatabase db,
         MonitorConfig config,
-        MonitorLog log)
+        MonitorLog log,
+        List<AIFunction> pipelineTools)
     {
         _client = client;
         _db = db;
         _config = config;
         _log = log;
+        _pipelineTools = pipelineTools;
     }
 
     public async Task StartAsync()
@@ -73,7 +74,6 @@ public sealed class PollingAgent : IAsyncDisposable
             },
             Tools = CreateTools(),
             SkillDirectories = SessionConfigHelper.SkillDirectories,
-            McpServers = SessionConfigHelper.McpServers,
         });
 
         // Subscribe to session events and forward to the shared log
@@ -109,52 +109,9 @@ public sealed class PollingAgent : IAsyncDisposable
 
     private List<AIFunction> CreateTools()
     {
-        return
-        [
-            AIFunctionFactory.Create(CheckBuildExists, "check_build_exists",
-                "Check if a build with this AzDO build ID is already in the database"),
-
-            AIFunctionFactory.Create(RecordBuild, "record_build",
-                "Record a build in the monitoring database. Returns the database row ID."),
-
-            AIFunctionFactory.Create(RecordTestFailures, "record_test_failures",
-                "Record test failures for a build in the database"),
-        ];
-    }
-
-    // --- Tool implementations (SQLite only) ---
-
-    private bool CheckBuildExists(
-        [Description("The AzDO build ID")] int azdoBuildId)
-    {
-        return _db.HasBuild(azdoBuildId);
-    }
-
-    private long RecordBuild(
-        [Description("AzDO build ID")] int azdoBuildId,
-        [Description("Repository in owner/repo format")] string repository,
-        [Description("Build number string")] string buildNumber,
-        [Description("Git source branch ref")] string sourceBranch,
-        [Description("Pipeline definition name")] string definitionName,
-        [Description("Build status")] string status,
-        [Description("Build result (succeeded, failed, etc.)")] string? result,
-        [Description("Whether the build has test failures")] bool hasTestFailures)
-    {
-        return _db.InsertBuild(
-            azdoBuildId, repository, buildNumber, sourceBranch,
-            definitionName, status, result, null, hasTestFailures);
-    }
-
-    private int RecordTestFailures(
-        [Description("Database row ID of the build")] long buildId,
-        [Description("JSON array of test failures with testName, outcome, errorMessage fields")] string failuresJson)
-    {
-        var failures = JsonSerializer.Deserialize<List<TestFailureInput>>(failuresJson, s_jsonOptions) ?? [];
-        foreach (var f in failures)
-        {
-            _db.InsertTestFailure(buildId, f.TestName, f.Outcome, f.ErrorMessage);
-        }
-        return failures.Count;
+        var tools = new List<AIFunction>(_pipelineTools);
+        tools.AddRange(DatabaseToolFactory.Create(_db));
+        return tools;
     }
 
     public async ValueTask DisposeAsync()
@@ -164,23 +121,5 @@ public sealed class PollingAgent : IAsyncDisposable
         {
             await _session.DisposeAsync();
         }
-    }
-
-    private static readonly JsonSerializerOptions s_jsonOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNameCaseInsensitive = true,
-    };
-
-    private sealed class TestFailureInput
-    {
-        [System.Text.Json.Serialization.JsonPropertyName("testName")]
-        public required string TestName { get; init; }
-
-        [System.Text.Json.Serialization.JsonPropertyName("outcome")]
-        public required string Outcome { get; init; }
-
-        [System.Text.Json.Serialization.JsonPropertyName("errorMessage")]
-        public string? ErrorMessage { get; init; }
     }
 }

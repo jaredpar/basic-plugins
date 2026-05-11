@@ -18,7 +18,7 @@ public static class BuildPromptHelper
     /// Runs a Copilot session that fetches builds based on a user prompt and calls
     /// the provided handler for each emitted build.
     /// </summary>
-    public static async Task<List<EmittedBuild>> RunBuildPromptAsync(CopilotClient client, string prompt)
+    public static async Task<List<EmittedBuild>> RunBuildPromptAsync(CopilotClient client, List<AIFunction> pipelineTools, string prompt)
     {
         var emittedBuilds = new List<EmittedBuild>();
 
@@ -54,6 +54,7 @@ public static class BuildPromptHelper
                   "status": "completed", "result": "failed" }
                 """),
         };
+        tools.AddRange(pipelineTools);
 
         await using var session = await client.CreateSessionAsync(new SessionConfig
         {
@@ -66,7 +67,6 @@ public static class BuildPromptHelper
             },
             Tools = tools,
             SkillDirectories = SessionConfigHelper.SkillDirectories,
-            McpServers = SessionConfigHelper.McpServers,
         });
 
         var done = new TaskCompletionSource();

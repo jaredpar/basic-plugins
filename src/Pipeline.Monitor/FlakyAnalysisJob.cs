@@ -14,14 +14,16 @@ public sealed class FlakyAnalysisJob
     private readonly CopilotClient _client;
     private readonly MonitorDatabase _db;
     private readonly MonitorLog _log;
+    private readonly List<AIFunction> _pipelineTools;
     private readonly CancellationTokenSource _cts = new();
     private const string Source = "flaky";
 
-    public FlakyAnalysisJob(CopilotClient client, MonitorDatabase db, MonitorLog log)
+    public FlakyAnalysisJob(CopilotClient client, MonitorDatabase db, MonitorLog log, List<AIFunction> pipelineTools)
     {
         _client = client;
         _db = db;
         _log = log;
+        _pipelineTools = pipelineTools;
     }
 
     public Task StartAsync()
@@ -265,6 +267,8 @@ public sealed class FlakyAnalysisJob
                     "record_flaky_determination",
                     "Record whether a test failure is flaky, with diagnosis and optional fix"),
             };
+            tools.AddRange(_pipelineTools);
+            tools.AddRange(DatabaseToolFactory.Create(_db));
 
             await using var session = await _client.CreateSessionAsync(new SessionConfig
             {
@@ -277,7 +281,6 @@ public sealed class FlakyAnalysisJob
                 },
                 Tools = tools,
                 SkillDirectories = SessionConfigHelper.SkillDirectories,
-                McpServers = SessionConfigHelper.McpServers,
             });
 
             var tcs = new TaskCompletionSource();

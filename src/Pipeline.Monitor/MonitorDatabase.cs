@@ -985,6 +985,42 @@ public sealed class MonitorDatabase : IDisposable
     }
 
     /// <summary>
+    /// Fully resets collection data for a build: deletes all test failures and helix work items,
+    /// resets both collection states to 'pending', and clears the last collection attempt.
+    /// The collection jobs will re-collect the data on their next pass.
+    /// </summary>
+    public bool ResetBuildCollectionData(int azdoBuildId)
+    {
+        var rowId = GetBuildRowId(azdoBuildId);
+        if (rowId is null)
+            return false;
+
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "DELETE FROM helix_work_items WHERE build_id = @id";
+        cmd.Parameters.AddWithValue("@id", rowId.Value);
+        cmd.ExecuteNonQuery();
+
+        using var cmd2 = _connection.CreateCommand();
+        cmd2.CommandText = "DELETE FROM test_failures WHERE build_id = @id";
+        cmd2.Parameters.AddWithValue("@id", rowId.Value);
+        cmd2.ExecuteNonQuery();
+
+        using var cmd3 = _connection.CreateCommand();
+        cmd3.CommandText = """
+            UPDATE builds SET
+                azdo_failure_state = 'pending',
+                helix_failure_state = 'pending',
+                collection_failures = 0,
+                last_collection_attempt = NULL
+            WHERE id = @id;
+            """;
+        cmd3.Parameters.AddWithValue("@id", rowId.Value);
+        cmd3.ExecuteNonQuery();
+
+        return true;
+    }
+
+    /// <summary>
     /// Inserts a Helix work item record.
     /// </summary>
     public long InsertHelixWorkItem(long buildId, string friendlyName, int exitCode, string machineName,

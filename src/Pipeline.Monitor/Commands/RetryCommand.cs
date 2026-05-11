@@ -1,4 +1,5 @@
 using GitHub.Copilot.SDK;
+using Microsoft.Extensions.AI;
 using Spectre.Console;
 
 namespace Pipeline.Monitor.Commands;
@@ -9,7 +10,7 @@ namespace Pipeline.Monitor.Commands;
 /// </summary>
 public static class RetryCommand
 {
-    public static async Task ExecuteAsync(CopilotClient client, MonitorDatabase db)
+    public static async Task ExecuteAsync(CopilotClient client, MonitorDatabase db, List<AIFunction> pipelineTools)
     {
         var prompt = AnsiConsole.Prompt(
             new TextPrompt<string>("[bold]Describe which builds to retry:[/] ")
@@ -23,7 +24,7 @@ public static class RetryCommand
 
         AnsiConsole.MarkupLine("[dim]Finding builds...[/]");
 
-        var builds = await BuildPromptHelper.RunBuildPromptAsync(client, prompt);
+        var builds = await BuildPromptHelper.RunBuildPromptAsync(client, pipelineTools, prompt);
 
         if (builds.Count == 0)
         {
