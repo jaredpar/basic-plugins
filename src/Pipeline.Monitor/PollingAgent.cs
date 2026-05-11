@@ -49,15 +49,13 @@ public sealed class PollingAgent : IAsyncDisposable
 
             Your workflow for each poll cycle:
             1. For each configured pipeline, use the `azdo_builds_for_repo` MCP tool to fetch recent completed builds
-            2. For each build, call `check_build_exists` to see if it's already recorded
-            3. For new builds, call `record_build` to save it to the database
-            4. For builds with a result of "failed" or "partiallySucceeded", use the `azdo_test_failures` MCP tool
-               to get failure details, then call `record_test_failures` to save them
-            5. You may also use the `helix_work_items_for_build` MCP tool to get Helix-level details for failed builds
-            6. After processing all pipelines, wait for the poll interval and repeat
+            2. For each build, call `db_check_build_exists` to see if it's already recorded
+            3. For new builds, call `db_record_build` to save it to the database
+            4. After processing all pipelines, wait for the poll interval and repeat
 
-            Be concise in your messages. Report what you found: how many new builds, how many with failures.
-            When you find test failures, list the test names briefly.
+            Do NOT collect test failures or Helix data — that is handled automatically by a separate collection job.
+
+            Be concise in your messages. Report what you found: how many new builds were recorded.
             
             Start your first poll immediately.
             """;

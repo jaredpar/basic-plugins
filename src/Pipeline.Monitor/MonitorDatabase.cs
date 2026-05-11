@@ -38,7 +38,7 @@ public sealed class MonitorDatabase : IDisposable
                 status TEXT NOT NULL,
                 result TEXT,
                 finish_time TEXT,
-                has_test_failures INTEGER NOT NULL DEFAULT 0,
+                has_test_failures INTEGER DEFAULT 0,
                 azdo_failure_state TEXT NOT NULL DEFAULT 'pending',
                 helix_failure_state TEXT NOT NULL DEFAULT 'pending',
                 collection_failures INTEGER NOT NULL DEFAULT 0,
@@ -133,6 +133,7 @@ public sealed class MonitorDatabase : IDisposable
         MigrateAddColumn("helix_work_items", "console_summary", "TEXT");
         MigrateAddColumn("builds", "azdo_collection_state", "INTEGER NOT NULL DEFAULT 0");
         MigrateAddColumn("builds", "helix_collection_state", "INTEGER NOT NULL DEFAULT 0");
+        MigrateAddColumn("test_failures", "comment", "TEXT");
     }
 
     /// <summary>
@@ -242,7 +243,7 @@ public sealed class MonitorDatabase : IDisposable
         string status,
         string? result,
         DateTime? finishTime,
-        bool hasTestFailures)
+        bool? hasTestFailures = null)
     {
         // Succeeded builds don't need failure collection or triage
         var azdoState = result == "succeeded" ? "collected" : "pending";
@@ -263,7 +264,7 @@ public sealed class MonitorDatabase : IDisposable
         cmd.Parameters.AddWithValue("@status", status);
         cmd.Parameters.AddWithValue("@result", (object?)result ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@finishTime", finishTime?.ToString("o") ?? (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("@hasTestFailures", hasTestFailures ? 1 : 0);
+        cmd.Parameters.AddWithValue("@hasTestFailures", hasTestFailures.HasValue ? (object)(hasTestFailures.Value ? 1 : 0) : DBNull.Value);
         cmd.Parameters.AddWithValue("@azdoState", azdoState);
         cmd.Parameters.AddWithValue("@helixState", helixState);
         cmd.Parameters.AddWithValue("@triageState", triageState);
@@ -273,24 +274,64 @@ public sealed class MonitorDatabase : IDisposable
     /// <summary>
     /// Records a test failure linked to a build.
     /// </summary>
-    public void InsertTestFailure(long buildId, string testName, string outcome, string? errorMessage, string? stackTrace = null)
+    public void InsertTestFailure(long buildId, string testName, string outcome, string? errorMessage, string? stackTrace = null, string? comment = null)
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO test_failures (build_id, test_name, outcome, error_message, stack_trace)
-            VALUES (@buildId, @testName, @outcome, @errorMessage, @stackTrace);
+            INSERT INTO test_failures (build_id, test_name, outcome, error_message, stack_trace, comment)
+            VALUES (@buildId, @testName, @outcome, @errorMessage, @stackTrace, @comment);
             """;
         cmd.Parameters.AddWithValue("@buildId", buildId);
         cmd.Parameters.AddWithValue("@testName", testName);
         cmd.Parameters.AddWithValue("@outcome", outcome);
         cmd.Parameters.AddWithValue("@errorMessage", (object?)errorMessage ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@stackTrace", (object?)stackTrace ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@comment", (object?)comment ?? DBNull.Value);
         cmd.ExecuteNonQuery();
     }
 
     /// <summary>
-    /// Creates a triage request for a build with test failures.
+    /// Returns distinct Helix job names extracted from test failure comments for a build.
+    /// Helix embeds JSON like {"HelixJobId":"guid","HelixWorkItemName":"name"} in AzDO test result comments.
+    /// Note: despite the JSON field being called "HelixJobId", the value is actually the Helix job name (a GUID string),
+    /// not the numeric job ID.
     /// </summary>
+    public List<string> GetHelixJobNamesFromComments(long buildId)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT DISTINCT comment FROM test_failures
+            WHERE build_id = @buildId
+            AND comment IS NOT NULL
+            AND comment LIKE '%HelixJobId%'
+            """;
+        cmd.Parameters.AddWithValue("@buildId", buildId);
+
+        var jobNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var comment = reader.GetString(0);
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(comment);
+                if (doc.RootElement.TryGetProperty("HelixJobId", out var jobIdElement))
+                {
+                    var jobId = jobIdElement.GetString();
+                    if (!string.IsNullOrEmpty(jobId))
+                        jobNames.Add(jobId);
+                }
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // Not valid JSON — skip
+            }
+        }
+
+        return jobNames.ToList();
+    }
+
+    /// <summary>
     public long InsertTriageRequest(long buildId, string repository, int? prNumber)
     {
         using var cmd = _connection.CreateCommand();
@@ -797,7 +838,7 @@ public sealed class MonitorDatabase : IDisposable
                 Status = reader.GetString(5),
                 Result = reader.IsDBNull(6) ? null : reader.GetString(6),
                 FinishTime = reader.IsDBNull(7) ? null : reader.GetString(7),
-                HasTestFailures = reader.GetInt32(8) != 0,
+                HasTestFailures = reader.IsDBNull(8) ? null : reader.GetInt32(8) != 0,
                 AzdoFailureState = reader.GetString(9),
                 HelixFailureState = reader.GetString(10),
                 TestFailureCount = reader.GetInt32(11),
@@ -837,7 +878,7 @@ public sealed class MonitorDatabase : IDisposable
                 Status = reader.GetString(5),
                 Result = reader.IsDBNull(6) ? null : reader.GetString(6),
                 FinishTime = reader.IsDBNull(7) ? null : reader.GetString(7),
-                HasTestFailures = reader.GetInt32(8) != 0,
+                HasTestFailures = reader.IsDBNull(8) ? null : reader.GetInt32(8) != 0,
                 AzdoFailureState = reader.GetString(9),
                 HelixFailureState = reader.GetString(10),
                 TestFailureCount = reader.GetInt32(11),
@@ -875,7 +916,7 @@ public sealed class MonitorDatabase : IDisposable
                 Repository = reader.GetString(2),
                 AzdoFailureState = reader.GetString(3),
                 HelixFailureState = reader.GetString(4),
-                HasTestFailures = reader.GetInt32(5) != 0,
+                HasTestFailures = reader.IsDBNull(5) ? null : reader.GetInt32(5) != 0,
                 FinishTime = reader.IsDBNull(6) ? null : reader.GetString(6),
             });
         }
@@ -1143,7 +1184,7 @@ public sealed class BuildRecord
     public required string Status { get; init; }
     public string? Result { get; init; }
     public string? FinishTime { get; init; }
-    public bool HasTestFailures { get; init; }
+    public bool? HasTestFailures { get; init; }
     public required string AzdoFailureState { get; init; }
     public required string HelixFailureState { get; init; }
     public int TestFailureCount { get; init; }
@@ -1156,7 +1197,7 @@ public sealed class CollectionTarget
     public required string Repository { get; init; }
     public required string AzdoFailureState { get; init; }
     public required string HelixFailureState { get; init; }
-    public bool HasTestFailures { get; init; }
+    public bool? HasTestFailures { get; init; }
     public string? FinishTime { get; init; }
 }
 

@@ -52,7 +52,7 @@ public static class AddCommand
                 build.Status,
                 build.Result,
                 null,
-                hasTestFailures: false);
+                hasTestFailures: null);
 
             imported++;
         }

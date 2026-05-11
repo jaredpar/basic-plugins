@@ -128,6 +128,19 @@ public static class HelixToolFactory
                 },
                 "helix_files_for_work_item",
                 "Get file metadata for a specific Helix work item by job ID and work item ID."),
+
+            AIFunctionFactory.Create(
+                async (
+                    [Description("Comma-separated list of Helix job name GUIDs (e.g. 'e35f3353-8d05-4ff7-b4e2-aa9d8b03d1f6,bc40c29a-e82e-4385-9625-861c83ce7cf2')")] string jobNames,
+                    [Description("The AzDO build ID (integer) associated with these jobs")] int azdoBuildId,
+                    [Description("WARNING: Do not set to true unless the user explicitly asks for succeeded/passing work items. Default (false) returns only failed items.")] bool includeAll) =>
+                {
+                    var names = jobNames.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+                    var items = await client.GetHelixWorkItemsByJobNamesAsync(names, azdoBuildId, includeAll);
+                    return JsonSerializer.Serialize(items, s_jsonOptions);
+                },
+                "helix_work_items_by_helix_job_names",
+                "Get Helix work items by directly querying with job name GUIDs. Useful when job names are known from AzDO test result comments (the HelixJobId field). Returns only failed items by default."),
         ];
     }
 }

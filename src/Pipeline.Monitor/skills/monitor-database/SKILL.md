@@ -26,7 +26,7 @@ Records every completed AzDO build the monitor has processed. Used to avoid repr
 | `status` | TEXT | Build status (e.g., `completed`) |
 | `result` | TEXT | Build result (e.g., `succeeded`, `failed`, `partiallySucceeded`) |
 | `finish_time` | TEXT | ISO 8601 timestamp |
-| `has_test_failures` | INTEGER | 1 if the build had test failures, 0 otherwise |
+| `has_test_failures` | INTEGER | 1 if the build had test failures, 0 if not, NULL if not yet determined |
 | `created_at` | TEXT | When this record was created |
 
 ### `test_failures`

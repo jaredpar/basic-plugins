@@ -93,13 +93,12 @@ public static class DatabaseToolFactory
                     [Description("Git source branch ref")] string sourceBranch,
                     [Description("Pipeline definition name")] string definitionName,
                     [Description("Build status")] string status,
-                    [Description("Build result (succeeded, failed, etc.)")] string? result,
-                    [Description("Whether the build has test failures")] bool hasTestFailures
+                    [Description("Build result (succeeded, failed, etc.)")] string? result
                 ) =>
                     db.InsertBuild(azdoBuildId, repository, buildNumber, sourceBranch,
-                        definitionName, status, result, null, hasTestFailures),
+                        definitionName, status, result, null),
                 "db_record_build",
-                "Record a build in the monitoring database. Returns the database row ID."),
+                "Record a build in the monitoring database. Returns the database row ID. Test failure status is determined automatically by the collection job."),
 
             AIFunctionFactory.Create(
                 (
@@ -110,7 +109,7 @@ public static class DatabaseToolFactory
                     var failures = JsonSerializer.Deserialize<List<TestFailureInput>>(failuresJson, s_jsonOptions) ?? [];
                     foreach (var f in failures)
                     {
-                        db.InsertTestFailure(buildId, f.TestName, f.Outcome, f.ErrorMessage);
+                        db.InsertTestFailure(buildId, f.TestName, f.Outcome, f.ErrorMessage, comment: f.Comment);
                     }
                     return failures.Count;
                 },
@@ -147,5 +146,8 @@ public static class DatabaseToolFactory
 
         [System.Text.Json.Serialization.JsonPropertyName("errorMessage")]
         public string? ErrorMessage { get; init; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("comment")]
+        public string? Comment { get; init; }
     }
 }

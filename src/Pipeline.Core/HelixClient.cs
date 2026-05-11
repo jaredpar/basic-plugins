@@ -46,6 +46,8 @@ public class HelixWorkItemConsole
 {
     [JsonPropertyName("jobId")]
     public long JobId { get; init; }
+    [JsonPropertyName("jobName")]
+    public required string JobName { get; init; }
     [JsonPropertyName("workItemId")]
     public long WorkItemId { get; init; }
     [JsonPropertyName("text")]
@@ -180,6 +182,33 @@ public sealed class HelixClient
         return items.Single();
     }
 
+    /// <summary>
+    /// Gets failed Helix work items by querying directly with job names (GUIDs).
+    /// This is the fallback path when the standard build-based query returns no results
+    /// but AzDO test result comments contain HelixJobId references (which are actually job names).
+    /// </summary>
+    public Task<List<HelixWorkItem>> GetHelixWorkItemsByJobNamesAsync(List<string> jobNames, int azdoBuildId, bool includeAll = false)
+    {
+        if (jobNames.Count == 0)
+            return Task.FromResult(new List<HelixWorkItem>());
+
+        var jobNameList = string.Join(", ", jobNames.Select(n => $"\"{n}\""));
+        var failedFilter = includeAll ? "" : "| where ExitCode != 0";
+        string query = $"""
+            WorkItems
+            | where JobName in ({jobNameList})
+            {failedFilter}
+            | extend AzdoBuildId = toint({azdoBuildId})
+            | extend AzdoPhaseName = ""
+            | extend AzdoAttempt = "1"
+            | extend ExecutionTime = (Finished - Started) / 1s
+            | extend QueuedTime = (Started - Queued) / 1s
+            | project FriendlyName, ExecutionTime, QueuedTime, AzdoBuildId, AzdoPhaseName, AzdoAttempt, MachineName, ExitCode, ConsoleUri, JobId, JobName, QueueName, Finished, WorkItemId, Status
+            """;
+
+        return QueryHelixWorkItem(query);
+    }
+
     private async Task<List<HelixWorkItem>> QueryHelixWorkItem(string query)
     {
         using var kustoQueryClient = KustoClientFactory.CreateCslQueryProvider(KustoConnectionStringBuilder);
@@ -234,6 +263,7 @@ public sealed class HelixClient
         return new HelixWorkItemConsole
         {
             JobId = workItem.JobId,
+            JobName = workItem.JobName,
             WorkItemId = workItem.WorkItemId,
             Text = text
         };
@@ -249,6 +279,7 @@ public sealed class HelixClient
             list.Add(new HelixWorkItemConsole
             {
                 JobId = workItem.JobId,
+                JobName = workItem.JobName,
                 WorkItemId = workItem.WorkItemId,
                 Text = text
             });
