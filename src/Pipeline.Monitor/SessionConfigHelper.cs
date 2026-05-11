@@ -1,6 +1,7 @@
 using GitHub.Copilot.SDK;
 using Microsoft.Extensions.AI;
 using Pipeline.Core;
+using Pipeline.Mcp.Core;
 
 namespace Pipeline.Monitor;
 

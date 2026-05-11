@@ -3,7 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Pipeline.Core;
 
-namespace Pipeline.Monitor;
+namespace Pipeline.Mcp.Core;
 
 /// <summary>
 /// Creates <see cref="AIFunction"/> instances that mirror the Helix MCP tools.

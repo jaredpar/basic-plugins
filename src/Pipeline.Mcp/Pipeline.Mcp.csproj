@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Pipeline.Core\Pipeline.Core.csproj" />
+    <ProjectReference Include="..\Pipeline.Mcp.Core\Pipeline.Mcp.Core.csproj" />
   </ItemGroup>
 
 </Project>
