@@ -15,11 +15,11 @@ public static class BuildsCommand
     {
         while (true)
         {
-            var builds = db.GetRecentBuilds(50);
+            var builds = db.GetRecentBuilds(50, failedOnly: true);
 
             if (builds.Count == 0)
             {
-                AnsiConsole.MarkupLine("[dim]No builds in the database yet.[/]");
+                AnsiConsole.MarkupLine("[dim]No failed builds in the database yet.[/]");
                 return;
             }
 
@@ -28,7 +28,11 @@ public static class BuildsCommand
             {
                 var branch = FormatBranch(build.SourceBranch);
                 var result = build.Result ?? "—";
-                labels.Add($"{build.AzdoBuildId} | {build.Repository} | {branch} | {result} | {build.TestFailureCount} failures");
+                var testInfo = build.TestFailureCount > 0 ? $"{build.TestFailureCount} tests" : "";
+                var helixInfo = build.HelixFailureCount > 0 ? $"{build.HelixFailureCount} helix" : "";
+                var failureParts = new[] { testInfo, helixInfo }.Where(s => s.Length > 0);
+                var failureSummary = failureParts.Any() ? string.Join(", ", failureParts) : "no failures collected";
+                labels.Add($"{build.AzdoBuildId} | {build.Repository} | {branch} | {result} | {failureSummary}");
             }
 
             var index = InteractiveMenu(labels, "Select a build (↑↓ navigate, Enter select, Esc back):");
@@ -365,17 +369,32 @@ public static class BuildsCommand
         AnsiConsole.Write(infoTable);
         AnsiConsole.WriteLine();
 
-        // Show stored summary first if available
+        // Show stored summary
         if (item.ConsoleSummary is not null)
         {
             var summaryRule = new Rule("[bold]Error Summary (extracted)[/]");
             summaryRule.Style = Style.Parse("red");
             AnsiConsole.Write(summaryRule);
             AnsiConsole.WriteLine(item.ConsoleSummary);
-            AnsiConsole.WriteLine();
+        }
+        else
+        {
+            AnsiConsole.MarkupLine("[dim]No stored console summary available.[/]");
         }
 
-        // Fetch full console output
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[dim]Press [bold]F[/] to fetch full log, any other key to return...[/]");
+        var key = Console.ReadKey(true);
+
+        if (key.Key == ConsoleKey.F)
+        {
+            await FetchAndShowFullLogAsync(item);
+        }
+    }
+
+    private static async Task FetchAndShowFullLogAsync(HelixWorkItemRecord item)
+    {
+        AnsiConsole.WriteLine();
         try
         {
             string consoleText = "";
@@ -405,14 +424,7 @@ public static class BuildsCommand
         }
         catch (Exception ex)
         {
-            if (item.ConsoleSummary is null)
-            {
-                AnsiConsole.MarkupLine($"[red]Failed to fetch console log: {ex.Message.EscapeMarkup()}[/]");
-            }
-            else
-            {
-                AnsiConsole.MarkupLine($"[dim]Full log unavailable ({ex.Message.EscapeMarkup()}) — summary shown above.[/]");
-            }
+            AnsiConsole.MarkupLine($"[red]Failed to fetch console log: {ex.Message.EscapeMarkup()}[/]");
         }
 
         AnsiConsole.WriteLine();

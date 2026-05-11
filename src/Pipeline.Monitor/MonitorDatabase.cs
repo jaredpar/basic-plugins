@@ -591,6 +591,7 @@ public sealed class MonitorDatabase : IDisposable
             FROM builds b
             WHERE b.triage_state = 'pending'
               AND b.azdo_failure_state = 'collected'
+              AND b.helix_failure_state = 'collected'
               AND b.has_test_failures = 1
             ORDER BY b.created_at DESC
             LIMIT @limit;
@@ -808,17 +809,18 @@ public sealed class MonitorDatabase : IDisposable
         }
         return list;
     }
-    public List<BuildRecord> GetRecentBuilds(int limit = 50)
+    public List<BuildRecord> GetRecentBuilds(int limit = 50, bool failedOnly = false)
     {
         using var cmd = _connection.CreateCommand();
-        cmd.CommandText = """
+        var whereClause = failedOnly ? "WHERE b.result = 'failed'" : "";
+        cmd.CommandText = $"""
             SELECT b.azdo_build_id, b.repository, b.build_number, b.source_branch,
                    b.definition_name, b.status, b.result, b.finish_time, b.has_test_failures,
                    b.azdo_failure_state, b.helix_failure_state,
-                   COUNT(tf.id) as failure_count
+                   (SELECT COUNT(*) FROM test_failures tf WHERE tf.build_id = b.id) as failure_count,
+                   (SELECT COUNT(*) FROM helix_work_items h WHERE h.build_id = b.id) as helix_count
             FROM builds b
-            LEFT JOIN test_failures tf ON tf.build_id = b.id
-            GROUP BY b.id
+            {whereClause}
             ORDER BY b.created_at DESC
             LIMIT @limit;
             """;
@@ -842,6 +844,7 @@ public sealed class MonitorDatabase : IDisposable
                 AzdoFailureState = reader.GetString(9),
                 HelixFailureState = reader.GetString(10),
                 TestFailureCount = reader.GetInt32(11),
+                HelixFailureCount = reader.GetInt32(12),
             });
         }
         return list;
@@ -857,11 +860,10 @@ public sealed class MonitorDatabase : IDisposable
             SELECT b.azdo_build_id, b.repository, b.build_number, b.source_branch,
                    b.definition_name, b.status, b.result, b.finish_time, b.has_test_failures,
                    b.azdo_failure_state, b.helix_failure_state,
-                   COUNT(tf.id) as failure_count
+                   (SELECT COUNT(*) FROM test_failures tf WHERE tf.build_id = b.id) as failure_count,
+                   (SELECT COUNT(*) FROM helix_work_items h WHERE h.build_id = b.id) as helix_count
             FROM builds b
-            LEFT JOIN test_failures tf ON tf.build_id = b.id
-            WHERE b.azdo_build_id = @id
-            GROUP BY b.id;
+            WHERE b.azdo_build_id = @id;
             """;
         cmd.Parameters.AddWithValue("@id", azdoBuildId);
 
@@ -882,6 +884,7 @@ public sealed class MonitorDatabase : IDisposable
                 AzdoFailureState = reader.GetString(9),
                 HelixFailureState = reader.GetString(10),
                 TestFailureCount = reader.GetInt32(11),
+                HelixFailureCount = reader.GetInt32(12),
             };
         }
         return null;
@@ -1188,6 +1191,7 @@ public sealed class BuildRecord
     public required string AzdoFailureState { get; init; }
     public required string HelixFailureState { get; init; }
     public int TestFailureCount { get; init; }
+    public int HelixFailureCount { get; init; }
 }
 
 public sealed class CollectionTarget
