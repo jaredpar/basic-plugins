@@ -18,6 +18,7 @@ public sealed class MonitorApp : IAsyncDisposable
     private readonly MonitorLog _log;
     private readonly PollingAgent _pollingAgent;
     private readonly FailureCollectionJob _collectionJob;
+    private readonly FlakyAnalysisJob _flakyAnalysisJob;
     private readonly CancellationTokenSource _cts = new();
 
     public MonitorApp(MonitorConfig config)
@@ -33,6 +34,7 @@ public sealed class MonitorApp : IAsyncDisposable
         _client = new CopilotClient();
         _pollingAgent = new PollingAgent(_client, _db, config, _log);
         _collectionJob = new FailureCollectionJob(_db, _azdoClient, _helixClient, _log);
+        _flakyAnalysisJob = new FlakyAnalysisJob(_client, _db, _log);
     }
 
     public async Task RunAsync()
@@ -48,13 +50,15 @@ public sealed class MonitorApp : IAsyncDisposable
 
         AnsiConsole.WriteLine();
 
-        // Start the Copilot client, polling agent, and failure collection job
+        // Start the Copilot client, polling agent, failure collection, and flaky analysis
         await _client.StartAsync();
         await _pollingAgent.StartAsync();
         _ = _collectionJob.StartAsync();
+        _ = _flakyAnalysisJob.StartAsync();
 
         AnsiConsole.MarkupLine("[green]Polling agent started.[/]");
         AnsiConsole.MarkupLine("[green]Failure collection job started.[/]");
+        AnsiConsole.MarkupLine("[green]Flaky analysis job started.[/]");
         AnsiConsole.MarkupLine("Type [bold]help[/] for available commands.");
         AnsiConsole.WriteLine();
 
@@ -85,6 +89,10 @@ public sealed class MonitorApp : IAsyncDisposable
                     await Commands.RetryCommand.ExecuteAsync(_client, _db);
                     break;
 
+                case "flaky":
+                    Commands.FlakyCommand.Execute(_db);
+                    break;
+
                 case "help":
                     PrintHelp();
                     break;
@@ -109,8 +117,9 @@ public sealed class MonitorApp : IAsyncDisposable
         var table = new Table().NoBorder();
         table.AddColumn(new TableColumn("Command").PadRight(4));
         table.AddColumn("Description");
-        table.AddRow("[bold]watch[/]", "Live-tail the polling agent output");
+        table.AddRow("[bold]watch[/]", "Live-tail background job output");
         table.AddRow("[bold]builds[/]", "Show builds in the database");
+        table.AddRow("[bold]flaky[/]", "Review flaky test determinations");
         table.AddRow("[bold]add[/]", "Import builds from AzDO using a natural language prompt");
         table.AddRow("[bold]retry[/]", "Retry failure collection for builds that previously failed");
         table.AddRow("[bold]help[/]", "Show this help message");
@@ -120,6 +129,7 @@ public sealed class MonitorApp : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        _flakyAnalysisJob.Stop();
         _collectionJob.Stop();
         await _pollingAgent.DisposeAsync();
         await _client.StopAsync();

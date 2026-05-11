@@ -44,6 +44,7 @@ public sealed class MonitorDatabase : IDisposable
                 collection_failures INTEGER NOT NULL DEFAULT 0,
                 last_collection_attempt TEXT,
                 timeline_json TEXT,
+                triage_state TEXT NOT NULL DEFAULT 'pending',
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
 
@@ -111,6 +112,7 @@ public sealed class MonitorDatabase : IDisposable
             CREATE INDEX IF NOT EXISTS idx_builds_azdo ON builds(azdo_build_id);
             CREATE INDEX IF NOT EXISTS idx_builds_repo ON builds(repository);
             CREATE INDEX IF NOT EXISTS idx_builds_collection ON builds(azdo_failure_state, helix_failure_state);
+            CREATE INDEX IF NOT EXISTS idx_builds_triage ON builds(triage_state);
             CREATE INDEX IF NOT EXISTS idx_test_failures_build ON test_failures(build_id);
             CREATE INDEX IF NOT EXISTS idx_helix_work_items_build ON helix_work_items(build_id);
             CREATE INDEX IF NOT EXISTS idx_triage_requests_status ON triage_requests(status);
@@ -212,14 +214,15 @@ public sealed class MonitorDatabase : IDisposable
         DateTime? finishTime,
         bool hasTestFailures)
     {
-        // Succeeded builds don't need failure collection
+        // Succeeded builds don't need failure collection or triage
         var azdoState = result == "succeeded" ? "collected" : "pending";
         var helixState = result == "succeeded" ? "collected" : "pending";
+        var triageState = result == "succeeded" ? "skipped" : "pending";
 
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO builds (azdo_build_id, repository, build_number, source_branch, definition_name, status, result, finish_time, has_test_failures, azdo_failure_state, helix_failure_state)
-            VALUES (@azdoBuildId, @repository, @buildNumber, @sourceBranch, @definitionName, @status, @result, @finishTime, @hasTestFailures, @azdoState, @helixState);
+            INSERT INTO builds (azdo_build_id, repository, build_number, source_branch, definition_name, status, result, finish_time, has_test_failures, azdo_failure_state, helix_failure_state, triage_state)
+            VALUES (@azdoBuildId, @repository, @buildNumber, @sourceBranch, @definitionName, @status, @result, @finishTime, @hasTestFailures, @azdoState, @helixState, @triageState);
             SELECT last_insert_rowid();
             """;
         cmd.Parameters.AddWithValue("@azdoBuildId", azdoBuildId);
@@ -233,6 +236,7 @@ public sealed class MonitorDatabase : IDisposable
         cmd.Parameters.AddWithValue("@hasTestFailures", hasTestFailures ? 1 : 0);
         cmd.Parameters.AddWithValue("@azdoState", azdoState);
         cmd.Parameters.AddWithValue("@helixState", helixState);
+        cmd.Parameters.AddWithValue("@triageState", triageState);
         return (long)cmd.ExecuteScalar()!;
     }
 
@@ -456,8 +460,233 @@ public sealed class MonitorDatabase : IDisposable
     }
 
     /// <summary>
-    /// Gets recent builds with their test failure counts and collection state.
+    /// Gets builds that are ready for flaky analysis: AzDO data collected, has test failures, not yet triaged.
     /// </summary>
+    public List<TriageTarget> GetBuildsForTriaging(int limit = 1)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT b.id, b.azdo_build_id, b.repository, b.source_branch, b.result, b.timeline_json
+            FROM builds b
+            WHERE b.triage_state = 'pending'
+              AND b.azdo_failure_state = 'collected'
+              AND b.has_test_failures = 1
+            ORDER BY b.created_at DESC
+            LIMIT @limit;
+            """;
+        cmd.Parameters.AddWithValue("@limit", limit);
+
+        var list = new List<TriageTarget>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            list.Add(new TriageTarget
+            {
+                BuildId = reader.GetInt64(0),
+                AzdoBuildId = reader.GetInt32(1),
+                Repository = reader.GetString(2),
+                SourceBranch = reader.GetString(3),
+                Result = reader.IsDBNull(4) ? null : reader.GetString(4),
+                TimelineJson = reader.IsDBNull(5) ? null : reader.GetString(5),
+            });
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Sets the triage state for a build.
+    /// </summary>
+    public void SetTriageState(long buildId, string state)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "UPDATE builds SET triage_state = @state WHERE id = @id";
+        cmd.Parameters.AddWithValue("@state", state);
+        cmd.Parameters.AddWithValue("@id", buildId);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Gets the failure history for a test across all builds. Returns build IDs, results, and dates.
+    /// </summary>
+    public List<TestHistoryEntry> GetTestHistoryForName(string testName, string repository, int limit = 20)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT b.azdo_build_id, b.result, b.source_branch, b.finish_time, tf.outcome, tf.error_message
+            FROM test_failures tf
+            JOIN builds b ON b.id = tf.build_id
+            WHERE tf.test_name = @testName AND b.repository = @repository
+            ORDER BY b.created_at DESC
+            LIMIT @limit;
+            """;
+        cmd.Parameters.AddWithValue("@testName", testName);
+        cmd.Parameters.AddWithValue("@repository", repository);
+        cmd.Parameters.AddWithValue("@limit", limit);
+
+        var list = new List<TestHistoryEntry>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            list.Add(new TestHistoryEntry
+            {
+                AzdoBuildId = reader.GetInt32(0),
+                BuildResult = reader.IsDBNull(1) ? null : reader.GetString(1),
+                SourceBranch = reader.GetString(2),
+                FinishTime = reader.IsDBNull(3) ? null : reader.GetString(3),
+                Outcome = reader.GetString(4),
+                ErrorMessage = reader.IsDBNull(5) ? null : reader.GetString(5),
+            });
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Gets the flaky test record for a test name and repository, if one exists.
+    /// </summary>
+    public FlakyTestRecord? GetFlakyTest(string testName, string repository)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, test_name, repository, occurrence_count, issue_number, issue_url, first_seen, last_seen
+            FROM flaky_tests
+            WHERE test_name = @testName AND repository = @repository;
+            """;
+        cmd.Parameters.AddWithValue("@testName", testName);
+        cmd.Parameters.AddWithValue("@repository", repository);
+
+        using var reader = cmd.ExecuteReader();
+        if (reader.Read())
+        {
+            return new FlakyTestRecord
+            {
+                Id = reader.GetInt64(0),
+                TestName = reader.GetString(1),
+                Repository = reader.GetString(2),
+                OccurrenceCount = reader.GetInt32(3),
+                IssueNumber = reader.IsDBNull(4) ? null : reader.GetInt32(4),
+                IssueUrl = reader.IsDBNull(5) ? null : reader.GetString(5),
+                FirstSeen = reader.GetString(6),
+                LastSeen = reader.GetString(7),
+            };
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Gets all tracked flaky tests, ordered by most recently seen.
+    /// </summary>
+    public List<FlakyTestRecord> GetAllFlakyTests()
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, test_name, repository, occurrence_count, issue_number, issue_url, first_seen, last_seen
+            FROM flaky_tests
+            ORDER BY last_seen DESC;
+            """;
+
+        var list = new List<FlakyTestRecord>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            list.Add(new FlakyTestRecord
+            {
+                Id = reader.GetInt64(0),
+                TestName = reader.GetString(1),
+                Repository = reader.GetString(2),
+                OccurrenceCount = reader.GetInt32(3),
+                IssueNumber = reader.IsDBNull(4) ? null : reader.GetInt32(4),
+                IssueUrl = reader.IsDBNull(5) ? null : reader.GetString(5),
+                FirstSeen = reader.GetString(6),
+                LastSeen = reader.GetString(7),
+            });
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Gets recent triage results (completed triage requests) with build info.
+    /// </summary>
+    public List<TriageResultRecord> GetRecentTriageResults(int limit = 50)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT tr.id, tr.build_id, b.azdo_build_id, tr.repository, tr.result_json,
+                   tr.created_at, tr.completed_at, b.source_branch
+            FROM triage_requests tr
+            JOIN builds b ON b.id = tr.build_id
+            WHERE tr.status = 'completed'
+            ORDER BY tr.completed_at DESC
+            LIMIT @limit;
+            """;
+        cmd.Parameters.AddWithValue("@limit", limit);
+
+        var list = new List<TriageResultRecord>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            list.Add(new TriageResultRecord
+            {
+                Id = reader.GetInt64(0),
+                BuildId = reader.GetInt64(1),
+                AzdoBuildId = reader.GetInt32(2),
+                Repository = reader.GetString(3),
+                ResultJson = reader.IsDBNull(4) ? null : reader.GetString(4),
+                CreatedAt = reader.GetString(5),
+                CompletedAt = reader.IsDBNull(6) ? null : reader.GetString(6),
+                SourceBranch = reader.GetString(7),
+            });
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Updates the issue tracking info for a flaky test.
+    /// </summary>
+    public void UpdateFlakyTestIssue(long id, int issueNumber, string issueUrl)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            UPDATE flaky_tests SET issue_number = @issueNumber, issue_url = @issueUrl
+            WHERE id = @id;
+            """;
+        cmd.Parameters.AddWithValue("@id", id);
+        cmd.Parameters.AddWithValue("@issueNumber", issueNumber);
+        cmd.Parameters.AddWithValue("@issueUrl", issueUrl);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Gets fix requests associated with a specific flaky test.
+    /// </summary>
+    public List<FixRequest> GetFixRequestsForTest(string testName, string repository)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, triage_request_id, repository, test_name, diagnosis, proposed_fix, issue_url
+            FROM fix_requests
+            WHERE test_name = @testName AND repository = @repository
+            ORDER BY created_at DESC;
+            """;
+        cmd.Parameters.AddWithValue("@testName", testName);
+        cmd.Parameters.AddWithValue("@repository", repository);
+
+        var list = new List<FixRequest>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            list.Add(new FixRequest
+            {
+                Id = reader.GetInt64(0),
+                TriageRequestId = reader.GetInt64(1),
+                Repository = reader.GetString(2),
+                TestName = reader.GetString(3),
+                Diagnosis = reader.GetString(4),
+                ProposedFix = reader.IsDBNull(5) ? null : reader.GetString(5),
+                IssueUrl = reader.IsDBNull(6) ? null : reader.GetString(6),
+            });
+        }
+        return list;
+    }
     public List<BuildRecord> GetRecentBuilds(int limit = 50)
     {
         using var cmd = _connection.CreateCommand();
@@ -754,4 +983,48 @@ public sealed class HelixWorkItemRecord
     public required long JobId { get; init; }
     public required long WorkItemId { get; init; }
     public required string Status { get; init; }
+}
+
+public sealed class TriageTarget
+{
+    public required long BuildId { get; init; }
+    public required int AzdoBuildId { get; init; }
+    public required string Repository { get; init; }
+    public required string SourceBranch { get; init; }
+    public string? Result { get; init; }
+    public string? TimelineJson { get; init; }
+}
+
+public sealed class TestHistoryEntry
+{
+    public required int AzdoBuildId { get; init; }
+    public string? BuildResult { get; init; }
+    public required string SourceBranch { get; init; }
+    public string? FinishTime { get; init; }
+    public required string Outcome { get; init; }
+    public string? ErrorMessage { get; init; }
+}
+
+public sealed class FlakyTestRecord
+{
+    public required long Id { get; init; }
+    public required string TestName { get; init; }
+    public required string Repository { get; init; }
+    public required int OccurrenceCount { get; init; }
+    public int? IssueNumber { get; init; }
+    public string? IssueUrl { get; init; }
+    public required string FirstSeen { get; init; }
+    public required string LastSeen { get; init; }
+}
+
+public sealed class TriageResultRecord
+{
+    public required long Id { get; init; }
+    public required long BuildId { get; init; }
+    public required int AzdoBuildId { get; init; }
+    public required string Repository { get; init; }
+    public string? ResultJson { get; init; }
+    public required string CreatedAt { get; init; }
+    public string? CompletedAt { get; init; }
+    public required string SourceBranch { get; init; }
 }
