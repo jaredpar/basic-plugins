@@ -166,12 +166,21 @@ public sealed class PollingAgent : IAsyncDisposable
         }
     }
 
-    private static readonly JsonSerializerOptions s_jsonOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions s_jsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNameCaseInsensitive = true,
+    };
 
     private sealed class TestFailureInput
     {
+        [System.Text.Json.Serialization.JsonPropertyName("testName")]
         public required string TestName { get; init; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("outcome")]
         public required string Outcome { get; init; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("errorMessage")]
         public string? ErrorMessage { get; init; }
     }
 }

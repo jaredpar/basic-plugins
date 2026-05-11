@@ -79,23 +79,16 @@ public sealed class FailureCollectionJob
         await _semaphore.WaitAsync(cancellationToken);
         try
         {
-            bool anyFailure = false;
-
             if (target.AzdoFailureState == "pending")
             {
                 if (!await CollectAzdoTestFailuresAsync(target))
-                    anyFailure = true;
+                    _db.RecordAzdoCollectionFailure(target.BuildId);
             }
 
             if (target.HelixFailureState == "pending")
             {
                 if (!await CollectHelixWorkItemsAsync(target))
-                    anyFailure = true;
-            }
-
-            if (anyFailure)
-            {
-                _db.RecordCollectionFailure(target.BuildId);
+                    _db.RecordHelixCollectionFailure(target.BuildId);
             }
         }
         finally
@@ -205,7 +198,7 @@ public sealed class FailureCollectionJob
 
             foreach (var item in items)
             {
-                _db.InsertHelixWorkItem(
+                var rowId = _db.InsertHelixWorkItem(
                     target.BuildId,
                     item.FriendlyName,
                     item.ExitCode,
@@ -215,6 +208,25 @@ public sealed class FailureCollectionJob
                     item.JobId,
                     item.WorkItemId,
                     item.Status);
+
+                // Fetch console output and extract error summary
+                try
+                {
+                    using var httpClient = new HttpClient();
+                    httpClient.Timeout = TimeSpan.FromSeconds(30);
+                    var consoleText = await httpClient.GetStringAsync(item.ConsoleUri);
+                    var summary = HelixConsoleExtractor.ExtractSummary(consoleText);
+
+                    if (summary.Length > 0)
+                    {
+                        _db.UpdateHelixConsoleSummary(rowId, summary);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Console fetch is supplementary — log but don't fail the collection
+                    _log.Warn(Source, $"Build {target.AzdoBuildId}: console fetch failed for {item.FriendlyName} — {ex.Message}");
+                }
             }
 
             if (items.Count > 0)

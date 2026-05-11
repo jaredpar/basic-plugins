@@ -159,6 +159,22 @@ public sealed class FlakyAnalysisJob
             }
         }
 
+        // Include Helix console summaries if available
+        var helixBlock = "";
+        var helixItems = _db.GetHelixWorkItemsForBuild(target.AzdoBuildId);
+        var helixWithSummaries = helixItems.Where(h => h.ConsoleSummary is not null).ToList();
+        if (helixWithSummaries.Count > 0)
+        {
+            var helixLines = helixWithSummaries.Select(h =>
+                $"### {h.FriendlyName} (exit {h.ExitCode}, queue: {h.QueueName})\n```\n{h.ConsoleSummary}\n```");
+            helixBlock = $"""
+
+                ## Helix Console Summaries (extracted error lines)
+
+                {string.Join("\n\n", helixLines)}
+                """;
+        }
+
         // Determine PR number for triage request
         int? prNumber = null;
         if (target.SourceBranch.StartsWith("refs/pull/"))
@@ -189,6 +205,7 @@ public sealed class FlakyAnalysisJob
                 ## Test Failures (with history from other builds)
 
                 {failureBlock}
+                {helixBlock}
 
                 ## Instructions
 
@@ -264,14 +281,31 @@ public sealed class FlakyAnalysisJob
             });
 
             var tcs = new TaskCompletionSource();
+            var chatLog = new List<ChatLogEntry>();
+
+            // Capture the system prompt and initial user message
+            chatLog.Add(new ChatLogEntry { Role = "system", Content = systemMessage });
+            chatLog.Add(new ChatLogEntry { Role = "user", Content = "Analyze all test failures in this build now." });
+
             using var sub = session.On(evt =>
             {
                 switch (evt)
                 {
+                    case AssistantMessageEvent msg:
+                        if (msg.Data.Content is { Length: > 0 } content)
+                            chatLog.Add(new ChatLogEntry { Role = "assistant", Content = content });
+                        break;
+                    case ToolExecutionStartEvent tool:
+                        chatLog.Add(new ChatLogEntry { Role = "tool_call", ToolName = tool.Data.ToolName });
+                        break;
+                    case ToolExecutionCompleteEvent tool:
+                        chatLog.Add(new ChatLogEntry { Role = "tool_result", ToolCallId = tool.Data.ToolCallId, Success = tool.Data.Success });
+                        break;
                     case SessionIdleEvent:
                         tcs.TrySetResult();
                         break;
                     case SessionErrorEvent err:
+                        chatLog.Add(new ChatLogEntry { Role = "error", Content = err.Data.Message });
                         _log.Error(Source, $"Session error: {err.Data.Message}");
                         break;
                 }
@@ -296,9 +330,10 @@ public sealed class FlakyAnalysisJob
                 _log.Warn(Source, $"Build {target.AzdoBuildId}: analysis timed out after 5 minutes");
             }
 
-            // Store the results
+            // Store the results and chat log
             var resultJson = JsonSerializer.Serialize(findings);
             _db.CompleteTriageRequest(triageRequestId, resultJson);
+            _db.SaveTriageChatLog(triageRequestId, JsonSerializer.Serialize(chatLog));
             _db.SetTriageState(target.BuildId, "triaged");
 
             var flakyCount = findings.Count(f => f.IsFlaky);
@@ -326,5 +361,23 @@ public sealed class FlakyAnalysisJob
         public required string Confidence { get; init; }
         public required string Diagnosis { get; init; }
         public string? ProposedFix { get; init; }
+    }
+
+    private sealed class ChatLogEntry
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("role")]
+        public required string Role { get; init; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("content")]
+        public string? Content { get; init; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("toolName")]
+        public string? ToolName { get; init; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("toolCallId")]
+        public string? ToolCallId { get; init; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("success")]
+        public bool? Success { get; init; }
     }
 }

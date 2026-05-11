@@ -21,6 +21,40 @@ if (args.Contains("--init"))
     return 0;
 }
 
+// --reset: delete the database file and exit
+if (args.Contains("--reset"))
+{
+    var resetConfigPath = args.FirstOrDefault(a => !a.StartsWith('-')) ?? MonitorConfig.DefaultConfigPath;
+    if (!File.Exists(resetConfigPath))
+    {
+        // No config — fall back to default database path
+        var defaultDb = MonitorConfig.DefaultDatabasePath;
+        if (File.Exists(defaultDb))
+        {
+            File.Delete(defaultDb);
+            AnsiConsole.MarkupLine($"[green]Deleted database:[/] {defaultDb}");
+        }
+        else
+        {
+            AnsiConsole.MarkupLine("[yellow]No database file found to delete.[/]");
+        }
+        return 0;
+    }
+
+    var resetConfig = MonitorConfig.Load(resetConfigPath);
+    var dbPath = Path.GetFullPath(resetConfig.Database);
+    if (File.Exists(dbPath))
+    {
+        File.Delete(dbPath);
+        AnsiConsole.MarkupLine($"[green]Deleted database:[/] {dbPath}");
+    }
+    else
+    {
+        AnsiConsole.MarkupLine($"[yellow]No database file found at:[/] {dbPath}");
+    }
+    return 0;
+}
+
 // Resolve config path
 var configPath = args.FirstOrDefault(a => !a.StartsWith('-')) ?? MonitorConfig.DefaultConfigPath;
 

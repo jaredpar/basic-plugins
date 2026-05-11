@@ -78,7 +78,7 @@ public sealed class MonitorApp : IAsyncDisposable
                     break;
 
                 case "builds":
-                    Commands.BuildsCommand.Execute(_db);
+                    await Commands.BuildsCommand.ExecuteAsync(_db);
                     break;
 
                 case "add":

@@ -109,6 +109,14 @@ public sealed class MonitorDatabase : IDisposable
                 completed_at TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS triage_chat_logs (
+                id INTEGER PRIMARY KEY,
+                triage_request_id INTEGER NOT NULL REFERENCES triage_requests(id),
+                chat_log TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_triage_chat_logs_request ON triage_chat_logs(triage_request_id);
             CREATE INDEX IF NOT EXISTS idx_builds_azdo ON builds(azdo_build_id);
             CREATE INDEX IF NOT EXISTS idx_builds_repo ON builds(repository);
             CREATE INDEX IF NOT EXISTS idx_builds_collection ON builds(azdo_failure_state, helix_failure_state);
@@ -120,6 +128,28 @@ public sealed class MonitorDatabase : IDisposable
             CREATE INDEX IF NOT EXISTS idx_flaky_tests_name ON flaky_tests(test_name, repository);
             """;
         cmd.ExecuteNonQuery();
+
+        // Migrations for columns added after initial schema
+        MigrateAddColumn("helix_work_items", "console_summary", "TEXT");
+        MigrateAddColumn("builds", "azdo_collection_state", "INTEGER NOT NULL DEFAULT 0");
+        MigrateAddColumn("builds", "helix_collection_state", "INTEGER NOT NULL DEFAULT 0");
+    }
+
+    /// <summary>
+    /// Safely adds a column to an existing table. No-op if the column already exists.
+    /// </summary>
+    private void MigrateAddColumn(string table, string column, string type)
+    {
+        try
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {type}";
+            cmd.ExecuteNonQuery();
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException)
+        {
+            // Column already exists — ignore
+        }
     }
 
     /// <summary>
@@ -255,6 +285,7 @@ public sealed class MonitorDatabase : IDisposable
         cmd.Parameters.AddWithValue("@outcome", outcome);
         cmd.Parameters.AddWithValue("@errorMessage", (object?)errorMessage ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@stackTrace", (object?)stackTrace ?? DBNull.Value);
+        cmd.ExecuteNonQuery();
     }
 
     /// <summary>
@@ -334,6 +365,55 @@ public sealed class MonitorDatabase : IDisposable
         cmd.Parameters.AddWithValue("@id", id);
         cmd.Parameters.AddWithValue("@error", error);
         cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Saves the full AI chat log for a triage request.
+    /// </summary>
+    public void SaveTriageChatLog(long triageRequestId, string chatLogJson)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO triage_chat_logs (triage_request_id, chat_log)
+            VALUES (@triageRequestId, @chatLog);
+            """;
+        cmd.Parameters.AddWithValue("@triageRequestId", triageRequestId);
+        cmd.Parameters.AddWithValue("@chatLog", chatLogJson);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Gets the triage result and chat log for a build by AzDO build ID.
+    /// Returns null if no completed triage exists.
+    /// </summary>
+    public TriageDetail? GetTriageDetailForBuild(int azdoBuildId)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT tr.id, tr.status, tr.result_json, tr.created_at, tr.completed_at,
+                   tcl.chat_log
+            FROM triage_requests tr
+            JOIN builds b ON b.id = tr.build_id
+            LEFT JOIN triage_chat_logs tcl ON tcl.triage_request_id = tr.id
+            WHERE b.azdo_build_id = @azdoBuildId
+            ORDER BY tr.created_at DESC
+            LIMIT 1;
+            """;
+        cmd.Parameters.AddWithValue("@azdoBuildId", azdoBuildId);
+
+        using var reader = cmd.ExecuteReader();
+        if (!reader.Read())
+            return null;
+
+        return new TriageDetail
+        {
+            TriageRequestId = reader.GetInt64(0),
+            Status = reader.GetString(1),
+            ResultJson = reader.IsDBNull(2) ? null : reader.GetString(2),
+            CreatedAt = reader.GetString(3),
+            CompletedAt = reader.IsDBNull(4) ? null : reader.GetString(4),
+            ChatLog = reader.IsDBNull(5) ? null : reader.GetString(5),
+        };
     }
 
     /// <summary>
@@ -727,6 +807,46 @@ public sealed class MonitorDatabase : IDisposable
     }
 
     /// <summary>
+    /// Gets a single build record by its AzDO build ID, or null if not found.
+    /// </summary>
+    public BuildRecord? GetBuildByAzdoId(int azdoBuildId)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT b.azdo_build_id, b.repository, b.build_number, b.source_branch,
+                   b.definition_name, b.status, b.result, b.finish_time, b.has_test_failures,
+                   b.azdo_failure_state, b.helix_failure_state,
+                   COUNT(tf.id) as failure_count
+            FROM builds b
+            LEFT JOIN test_failures tf ON tf.build_id = b.id
+            WHERE b.azdo_build_id = @id
+            GROUP BY b.id;
+            """;
+        cmd.Parameters.AddWithValue("@id", azdoBuildId);
+
+        using var reader = cmd.ExecuteReader();
+        if (reader.Read())
+        {
+            return new BuildRecord
+            {
+                AzdoBuildId = reader.GetInt32(0),
+                Repository = reader.GetString(1),
+                BuildNumber = reader.GetString(2),
+                SourceBranch = reader.GetString(3),
+                DefinitionName = reader.GetString(4),
+                Status = reader.GetString(5),
+                Result = reader.IsDBNull(6) ? null : reader.GetString(6),
+                FinishTime = reader.IsDBNull(7) ? null : reader.GetString(7),
+                HasTestFailures = reader.GetInt32(8) != 0,
+                AzdoFailureState = reader.GetString(9),
+                HelixFailureState = reader.GetString(10),
+                TestFailureCount = reader.GetInt32(11),
+            };
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Gets builds that need failure data collection (state = pending, not recently attempted).
     /// </summary>
     public List<CollectionTarget> GetPendingCollectionTargets(int limit = 4)
@@ -766,7 +886,7 @@ public sealed class MonitorDatabase : IDisposable
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
-            UPDATE builds SET azdo_failure_state = 'collected', collection_failures = 0
+            UPDATE builds SET azdo_failure_state = 'collected', azdo_collection_state = 0
             WHERE id = @id;
             """;
         cmd.Parameters.AddWithValue("@id", buildId);
@@ -780,7 +900,7 @@ public sealed class MonitorDatabase : IDisposable
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
-            UPDATE builds SET helix_failure_state = 'collected', collection_failures = 0
+            UPDATE builds SET helix_failure_state = 'collected', helix_collection_state = 0
             WHERE id = @id;
             """;
         cmd.Parameters.AddWithValue("@id", buildId);
@@ -788,21 +908,51 @@ public sealed class MonitorDatabase : IDisposable
     }
 
     /// <summary>
-    /// Records a collection failure. If consecutive failures reach the max, marks the
-    /// appropriate state as 'failed'.
+    /// Updates the console summary for a Helix work item.
     /// </summary>
-    public void RecordCollectionFailure(long buildId, int maxFailures = 3)
+    public void UpdateHelixConsoleSummary(long helixWorkItemId, string summary)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "UPDATE helix_work_items SET console_summary = @summary WHERE id = @id";
+        cmd.Parameters.AddWithValue("@id", helixWorkItemId);
+        cmd.Parameters.AddWithValue("@summary", summary);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Records an AzDO collection failure. If consecutive failures reach the max, marks
+    /// azdo_failure_state as 'failed'.
+    /// </summary>
+    public void RecordAzdoCollectionFailure(long buildId, int maxFailures = 3)
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
             UPDATE builds SET
-                collection_failures = collection_failures + 1,
+                azdo_collection_state = azdo_collection_state + 1,
                 last_collection_attempt = datetime('now'),
                 azdo_failure_state = CASE 
-                    WHEN azdo_failure_state = 'pending' AND collection_failures + 1 >= @max THEN 'failed'
-                    ELSE azdo_failure_state END,
+                    WHEN azdo_failure_state = 'pending' AND azdo_collection_state + 1 >= @max THEN 'failed'
+                    ELSE azdo_failure_state END
+            WHERE id = @id;
+            """;
+        cmd.Parameters.AddWithValue("@id", buildId);
+        cmd.Parameters.AddWithValue("@max", maxFailures);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Records a Helix collection failure. If consecutive failures reach the max, marks
+    /// helix_failure_state as 'failed'.
+    /// </summary>
+    public void RecordHelixCollectionFailure(long buildId, int maxFailures = 3)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            UPDATE builds SET
+                helix_collection_state = helix_collection_state + 1,
+                last_collection_attempt = datetime('now'),
                 helix_failure_state = CASE 
-                    WHEN helix_failure_state = 'pending' AND collection_failures + 1 >= @max THEN 'failed'
+                    WHEN helix_failure_state = 'pending' AND helix_collection_state + 1 >= @max THEN 'failed'
                     ELSE helix_failure_state END
             WHERE id = @id;
             """;
@@ -821,7 +971,8 @@ public sealed class MonitorDatabase : IDisposable
             UPDATE builds SET
                 azdo_failure_state = CASE WHEN azdo_failure_state = 'failed' THEN 'pending' ELSE azdo_failure_state END,
                 helix_failure_state = CASE WHEN helix_failure_state = 'failed' THEN 'pending' ELSE helix_failure_state END,
-                collection_failures = 0,
+                azdo_collection_state = CASE WHEN azdo_failure_state = 'failed' THEN 0 ELSE azdo_collection_state END,
+                helix_collection_state = CASE WHEN helix_failure_state = 'failed' THEN 0 ELSE helix_collection_state END,
                 last_collection_attempt = NULL
             WHERE azdo_build_id = @id
               AND (azdo_failure_state = 'failed' OR helix_failure_state = 'failed');
@@ -833,13 +984,14 @@ public sealed class MonitorDatabase : IDisposable
     /// <summary>
     /// Inserts a Helix work item record.
     /// </summary>
-    public void InsertHelixWorkItem(long buildId, string friendlyName, int exitCode, string machineName,
+    public long InsertHelixWorkItem(long buildId, string friendlyName, int exitCode, string machineName,
         string queueName, string consoleUri, long jobId, long workItemId, string status)
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
             INSERT INTO helix_work_items (build_id, friendly_name, exit_code, machine_name, queue_name, console_uri, job_id, work_item_id, status)
             VALUES (@buildId, @friendlyName, @exitCode, @machineName, @queueName, @consoleUri, @jobId, @workItemId, @status);
+            SELECT last_insert_rowid();
             """;
         cmd.Parameters.AddWithValue("@buildId", buildId);
         cmd.Parameters.AddWithValue("@friendlyName", friendlyName);
@@ -850,6 +1002,7 @@ public sealed class MonitorDatabase : IDisposable
         cmd.Parameters.AddWithValue("@jobId", jobId);
         cmd.Parameters.AddWithValue("@workItemId", workItemId);
         cmd.Parameters.AddWithValue("@status", status);
+        return (long)cmd.ExecuteScalar()!;
     }
 
     /// <summary>
@@ -890,7 +1043,7 @@ public sealed class MonitorDatabase : IDisposable
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
             SELECT h.friendly_name, h.exit_code, h.machine_name, h.queue_name,
-                   h.console_uri, h.job_id, h.work_item_id, h.status
+                   h.console_uri, h.job_id, h.work_item_id, h.status, h.console_summary
             FROM helix_work_items h
             JOIN builds b ON b.id = h.build_id
             WHERE b.azdo_build_id = @id
@@ -912,6 +1065,7 @@ public sealed class MonitorDatabase : IDisposable
                 JobId = reader.GetInt64(5),
                 WorkItemId = reader.GetInt64(6),
                 Status = reader.GetString(7),
+                ConsoleSummary = reader.IsDBNull(8) ? null : reader.GetString(8),
             });
         }
         return list;
@@ -983,6 +1137,7 @@ public sealed class HelixWorkItemRecord
     public required long JobId { get; init; }
     public required long WorkItemId { get; init; }
     public required string Status { get; init; }
+    public string? ConsoleSummary { get; init; }
 }
 
 public sealed class TriageTarget
@@ -1027,4 +1182,14 @@ public sealed class TriageResultRecord
     public required string CreatedAt { get; init; }
     public string? CompletedAt { get; init; }
     public required string SourceBranch { get; init; }
+}
+
+public sealed class TriageDetail
+{
+    public required long TriageRequestId { get; init; }
+    public required string Status { get; init; }
+    public string? ResultJson { get; init; }
+    public required string CreatedAt { get; init; }
+    public string? CompletedAt { get; init; }
+    public string? ChatLog { get; init; }
 }
