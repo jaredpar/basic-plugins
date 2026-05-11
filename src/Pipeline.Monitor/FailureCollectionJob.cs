@@ -87,8 +87,17 @@ public sealed class FailureCollectionJob
 
             if (target.HelixFailureState == "pending")
             {
-                if (!await CollectHelixWorkItemsAsync(target))
-                    _db.RecordHelixCollectionFailure(target.BuildId);
+                var result = await CollectHelixWorkItemsAsync(target);
+                switch (result)
+                {
+                    case HelixCollectionResult.Failed:
+                        _db.RecordHelixCollectionFailure(target.BuildId);
+                        break;
+                    case HelixCollectionResult.WaitingForIngestion:
+                        // Don't count as a failure — Kusto data not yet available.
+                        // The build stays pending and will be retried on the next poll.
+                        break;
+                }
             }
         }
         finally
@@ -177,10 +186,20 @@ public sealed class FailureCollectionJob
         }
     }
 
+    private enum HelixCollectionResult
+    {
+        /// <summary>Collection succeeded — data stored and state marked collected.</summary>
+        Success,
+        /// <summary>Collection failed due to an error (network, Kusto, etc.).</summary>
+        Failed,
+        /// <summary>Kusto returned 0 items but the build has test failures and is too recent — data likely not ingested yet.</summary>
+        WaitingForIngestion,
+    }
+
     /// <summary>
-    /// Fetches Helix work items for a build. Returns true on success.
+    /// Fetches Helix work items for a build.
     /// </summary>
-    private async Task<bool> CollectHelixWorkItemsAsync(CollectionTarget target)
+    private async Task<HelixCollectionResult> CollectHelixWorkItemsAsync(CollectionTarget target)
     {
         try
         {
@@ -190,11 +209,32 @@ public sealed class FailureCollectionJob
             {
                 _log.Warn(Source, $"Build {target.AzdoBuildId}: invalid repository format '{target.Repository}', skipping Helix");
                 _db.SetHelixCollected(target.BuildId);
-                return true;
+                return HelixCollectionResult.Success;
             }
 
             var items = await _helixClient.GetHelixWorkItemsForBuildAsync(
                 parts[0], parts[1], target.AzdoBuildId, includeAll: false);
+
+            // If Kusto returned 0 items but AzDO has test failures, the Helix data
+            // may not be ingested yet. Don't mark collected unless enough time has
+            // passed for Kusto ingestion (1 hour after build finish).
+            if (items.Count == 0 && HasTestFailuresInDb(target))
+            {
+                bool buildIsOldEnough = false;
+                if (target.FinishTime is not null &&
+                    DateTime.TryParse(target.FinishTime, out var finishTime))
+                {
+                    buildIsOldEnough = DateTime.UtcNow - finishTime > TimeSpan.FromHours(1);
+                }
+
+                if (!buildIsOldEnough)
+                {
+                    _log.Info(Source, $"Build {target.AzdoBuildId}: Kusto returned 0 Helix items but build has test failures — will retry (data may not be ingested yet)");
+                    return HelixCollectionResult.WaitingForIngestion;
+                }
+
+                _log.Info(Source, $"Build {target.AzdoBuildId}: Kusto returned 0 Helix items (build >1hr old, accepting as final)");
+            }
 
             foreach (var item in items)
             {
@@ -239,12 +279,25 @@ public sealed class FailureCollectionJob
             }
 
             _db.SetHelixCollected(target.BuildId);
-            return true;
+            return HelixCollectionResult.Success;
         }
         catch (Exception ex)
         {
             _log.Warn(Source, $"Build {target.AzdoBuildId}: Helix collection failed — {ex.Message}");
-            return false;
+            return HelixCollectionResult.Failed;
         }
+    }
+
+    /// <summary>
+    /// Checks whether the build has test failures recorded in the database,
+    /// either from the has_test_failures flag or from actual test_failures rows.
+    /// </summary>
+    private bool HasTestFailuresInDb(CollectionTarget target)
+    {
+        if (target.HasTestFailures)
+            return true;
+
+        // Also check if AzDO collection already stored test failure rows
+        return _db.HasTestFailuresForAzdoBuild(target.AzdoBuildId);
     }
 }

@@ -112,7 +112,7 @@ public sealed class MonitorApp : IAsyncDisposable
         }
     }
 
-    private static void PrintHelp()
+    private void PrintHelp()
     {
         var table = new Table().NoBorder();
         table.AddColumn(new TableColumn("Command").PadRight(4));
@@ -125,6 +125,9 @@ public sealed class MonitorApp : IAsyncDisposable
         table.AddRow("[bold]help[/]", "Show this help message");
         table.AddRow("[bold]quit[/]", "Shut down the monitor");
         AnsiConsole.Write(table);
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine($"[bold]Database:[/] {_config.Database.EscapeMarkup()}");
+        AnsiConsole.MarkupLine($"[bold]Config:[/]   {MonitorConfig.DefaultConfigPath.EscapeMarkup()}");
     }
 
     public async ValueTask DisposeAsync()

@@ -853,7 +853,8 @@ public sealed class MonitorDatabase : IDisposable
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
-            SELECT id, azdo_build_id, repository, azdo_failure_state, helix_failure_state
+            SELECT id, azdo_build_id, repository, azdo_failure_state, helix_failure_state,
+                   has_test_failures, finish_time
             FROM builds
             WHERE (azdo_failure_state = 'pending' OR helix_failure_state = 'pending')
               AND (last_collection_attempt IS NULL 
@@ -874,6 +875,8 @@ public sealed class MonitorDatabase : IDisposable
                 Repository = reader.GetString(2),
                 AzdoFailureState = reader.GetString(3),
                 HelixFailureState = reader.GetString(4),
+                HasTestFailures = reader.GetInt32(5) != 0,
+                FinishTime = reader.IsDBNull(6) ? null : reader.GetString(6),
             });
         }
         return list;
@@ -1117,6 +1120,8 @@ public sealed class CollectionTarget
     public required string Repository { get; init; }
     public required string AzdoFailureState { get; init; }
     public required string HelixFailureState { get; init; }
+    public bool HasTestFailures { get; init; }
+    public string? FinishTime { get; init; }
 }
 
 public sealed class TestFailureRecord
