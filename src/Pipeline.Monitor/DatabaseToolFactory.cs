@@ -121,9 +121,10 @@ public static class DatabaseToolFactory
                     [Description("The full test name")] string testName,
                     [Description("Repository in owner/repo format")] string repository,
                     [Description("GitHub issue number if one exists")] int? issueNumber,
-                    [Description("GitHub issue URL if one exists")] string? issueUrl
+                    [Description("GitHub issue URL if one exists")] string? issueUrl,
+                    [Description("Summary of the evidence and reasoning for why this test is flaky")] string? rationale
                 ) =>
-                    db.UpsertFlakyTest(testName, repository, issueNumber, issueUrl),
+                    db.UpsertFlakyTest(testName, repository, issueNumber, issueUrl, rationale),
                 "db_upsert_flaky_test",
                 "Record or update a flaky test entry. Increments occurrence count if already exists. Returns the row ID."),
 

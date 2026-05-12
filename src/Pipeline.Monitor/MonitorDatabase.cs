@@ -90,6 +90,7 @@ public sealed class MonitorDatabase : IDisposable
                 first_seen TEXT NOT NULL DEFAULT (datetime('now')),
                 last_seen TEXT NOT NULL DEFAULT (datetime('now')),
                 occurrence_count INTEGER NOT NULL DEFAULT 1,
+                rationale TEXT,
                 issue_number INTEGER,
                 issue_url TEXT,
                 UNIQUE(test_name, repository)
@@ -134,6 +135,7 @@ public sealed class MonitorDatabase : IDisposable
         MigrateAddColumn("builds", "azdo_collection_state", "INTEGER NOT NULL DEFAULT 0");
         MigrateAddColumn("builds", "helix_collection_state", "INTEGER NOT NULL DEFAULT 0");
         MigrateAddColumn("test_failures", "comment", "TEXT");
+        MigrateAddColumn("flaky_tests", "rationale", "TEXT");
     }
 
     /// <summary>
@@ -460,23 +462,25 @@ public sealed class MonitorDatabase : IDisposable
     /// <summary>
     /// Records or updates a flaky test entry. Returns the flaky_tests row ID.
     /// </summary>
-    public long UpsertFlakyTest(string testName, string repository, int? issueNumber, string? issueUrl)
+    public long UpsertFlakyTest(string testName, string repository, int? issueNumber, string? issueUrl, string? rationale = null)
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO flaky_tests (test_name, repository, issue_number, issue_url)
-            VALUES (@testName, @repository, @issueNumber, @issueUrl)
+            INSERT INTO flaky_tests (test_name, repository, issue_number, issue_url, rationale)
+            VALUES (@testName, @repository, @issueNumber, @issueUrl, @rationale)
             ON CONFLICT(test_name, repository) DO UPDATE SET
                 last_seen = datetime('now'),
                 occurrence_count = occurrence_count + 1,
                 issue_number = COALESCE(@issueNumber, issue_number),
-                issue_url = COALESCE(@issueUrl, issue_url);
+                issue_url = COALESCE(@issueUrl, issue_url),
+                rationale = COALESCE(@rationale, rationale);
             SELECT last_insert_rowid();
             """;
         cmd.Parameters.AddWithValue("@testName", testName);
         cmd.Parameters.AddWithValue("@repository", repository);
         cmd.Parameters.AddWithValue("@issueNumber", (object?)issueNumber ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@issueUrl", (object?)issueUrl ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@rationale", (object?)rationale ?? DBNull.Value);
         return (long)cmd.ExecuteScalar()!;
     }
 
@@ -669,7 +673,7 @@ public sealed class MonitorDatabase : IDisposable
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
-            SELECT id, test_name, repository, occurrence_count, issue_number, issue_url, first_seen, last_seen
+            SELECT id, test_name, repository, occurrence_count, issue_number, issue_url, first_seen, last_seen, rationale
             FROM flaky_tests
             WHERE test_name = @testName AND repository = @repository;
             """;
@@ -689,6 +693,7 @@ public sealed class MonitorDatabase : IDisposable
                 IssueUrl = reader.IsDBNull(5) ? null : reader.GetString(5),
                 FirstSeen = reader.GetString(6),
                 LastSeen = reader.GetString(7),
+                Rationale = reader.IsDBNull(8) ? null : reader.GetString(8),
             };
         }
         return null;
@@ -701,7 +706,7 @@ public sealed class MonitorDatabase : IDisposable
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
-            SELECT id, test_name, repository, occurrence_count, issue_number, issue_url, first_seen, last_seen
+            SELECT id, test_name, repository, occurrence_count, issue_number, issue_url, first_seen, last_seen, rationale
             FROM flaky_tests
             ORDER BY last_seen DESC;
             """;
@@ -720,6 +725,7 @@ public sealed class MonitorDatabase : IDisposable
                 IssueUrl = reader.IsDBNull(5) ? null : reader.GetString(5),
                 FirstSeen = reader.GetString(6),
                 LastSeen = reader.GetString(7),
+                Rationale = reader.IsDBNull(8) ? null : reader.GetString(8),
             });
         }
         return list;
@@ -1254,6 +1260,7 @@ public sealed class FlakyTestRecord
     public required int OccurrenceCount { get; init; }
     public int? IssueNumber { get; init; }
     public string? IssueUrl { get; init; }
+    public string? Rationale { get; init; }
     public required string FirstSeen { get; init; }
     public required string LastSeen { get; init; }
 }

@@ -71,6 +71,18 @@ public static class FlakyCommand
             AnsiConsole.Write(infoTable);
             AnsiConsole.WriteLine();
 
+            // Show rationale / evidence summary
+            if (!string.IsNullOrWhiteSpace(flaky.Rationale))
+            {
+                var rationaleRule = new Rule("[bold yellow]Rationale & Evidence[/]");
+                rationaleRule.Style = Style.Parse("yellow");
+                AnsiConsole.Write(rationaleRule);
+                AnsiConsole.WriteLine();
+                AnsiConsole.Write(new Markup(flaky.Rationale.EscapeMarkup()));
+                AnsiConsole.WriteLine();
+                AnsiConsole.WriteLine();
+            }
+
             // Show failure history
             var history = db.GetTestHistoryForName(flaky.TestName, flaky.Repository, limit: 10);
             if (history.Count > 0)
@@ -156,6 +168,13 @@ public static class FlakyCommand
             $"**Last seen:** {flaky.LastSeen}",
         };
 
+        if (!string.IsNullOrWhiteSpace(flaky.Rationale))
+        {
+            bodyParts.Add("");
+            bodyParts.Add("## Rationale & Evidence");
+            bodyParts.Add(flaky.Rationale);
+        }
+
         if (fixes.Count > 0)
         {
             bodyParts.Add("");
@@ -239,12 +258,15 @@ public static class FlakyCommand
     {
         var diagnosis = fixes.FirstOrDefault()?.Diagnosis ?? "Unknown";
         var proposedFix = fixes.FirstOrDefault()?.ProposedFix ?? "";
+        var rationale = flaky.Rationale ?? "";
 
         var prompt = $"""
             Fix the flaky test: {flaky.TestName}
             Repository: {flaky.Repository}
             
             Diagnosis: {diagnosis}
+            
+            Rationale: {rationale}
             
             Proposed fix: {proposedFix}
             

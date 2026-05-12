@@ -223,6 +223,14 @@ public sealed class FlakyAnalysisJob
                 can use to dig deeper into the build or related builds.
 
                 If you believe a fix is possible, describe it in the proposed_fix field.
+
+                IMPORTANT: For each determination, provide a clear `rationale` that summarizes the evidence
+                and reasoning behind your conclusion. This rationale will be shown to humans for review and
+                included in any filed issues, so it should be self-contained and persuasive. Include specific
+                evidence such as: which builds/branches the test failed in, patterns in the error messages,
+                whether the failures correlate with code changes or appear random, and any Helix/infrastructure
+                signals that support the conclusion.
+
                 Be thorough but concise. Analyze EVERY test failure listed above.
                 """;
 
@@ -234,6 +242,7 @@ public sealed class FlakyAnalysisJob
                         [Description("Whether this test failure appears to be flaky")] bool isFlaky,
                         [Description("Confidence level: high, medium, or low")] string confidence,
                         [Description("Brief explanation of why it is or isn't flaky")] string diagnosis,
+                        [Description("Summary of the evidence and reasoning behind the flaky determination. Include specific build IDs, branch patterns, error message patterns, and infrastructure signals.")] string rationale,
                         [Description("Proposed fix if one is apparent, null otherwise")] string? proposedFix
                     ) =>
                     {
@@ -243,12 +252,13 @@ public sealed class FlakyAnalysisJob
                             IsFlaky = isFlaky,
                             Confidence = confidence,
                             Diagnosis = diagnosis,
+                            Rationale = rationale,
                             ProposedFix = proposedFix,
                         });
 
                         if (isFlaky)
                         {
-                            _db.UpsertFlakyTest(testName, target.Repository, null, null);
+                            _db.UpsertFlakyTest(testName, target.Repository, null, null, rationale);
 
                             if (!string.IsNullOrWhiteSpace(proposedFix))
                             {
@@ -265,7 +275,7 @@ public sealed class FlakyAnalysisJob
                         return "Recorded.";
                     },
                     "record_flaky_determination",
-                    "Record whether a test failure is flaky, with diagnosis and optional fix"),
+                    "Record whether a test failure is flaky, with diagnosis, rationale, and optional fix"),
             };
             tools.AddRange(_pipelineTools);
             tools.AddRange(DatabaseToolFactory.Create(_db));
@@ -363,6 +373,7 @@ public sealed class FlakyAnalysisJob
         public required bool IsFlaky { get; init; }
         public required string Confidence { get; init; }
         public required string Diagnosis { get; init; }
+        public required string Rationale { get; init; }
         public string? ProposedFix { get; init; }
     }
 
