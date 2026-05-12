@@ -30,8 +30,9 @@ public static class ConsoleCommand
 
         await using var session = await client.CreateSessionAsync(new SessionConfig
         {
-            Model = "claude-opus-4.7",
+            Model = "claude-opus-4.6",
             OnPermissionRequest = PermissionHandler.ApproveAll,
+            Streaming = true,
             SystemMessage = new SystemMessageConfig
             {
                 Mode = SystemMessageMode.Append,
@@ -67,15 +68,15 @@ public static class ConsoleCommand
             {
                 switch (evt)
                 {
-                    case AssistantMessageEvent msg:
-                        if (msg.Data.Content is { Length: > 0 } content)
+                    case AssistantMessageDeltaEvent delta:
+                        if (delta.Data.DeltaContent is { Length: > 0 } chunk)
                         {
                             if (!hadContent)
                             {
                                 Console.WriteLine();
                                 hadContent = true;
                             }
-                            Console.Write(content);
+                            Console.Write(chunk);
                         }
                         break;
                     case ToolExecutionStartEvent tool:
