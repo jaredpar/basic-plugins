@@ -96,6 +96,14 @@ public sealed class MonitorApp : IAsyncDisposable
                     Commands.FlakyCommand.Execute(_db);
                     break;
 
+                case var c when c.StartsWith("copilot"):
+                    var subcommand = c.Length > 7 ? c[8..].Trim() : "";
+                    if (subcommand.Length == 0)
+                        AnsiConsole.MarkupLine("Usage: [bold]copilot install|uninstall|info[/]");
+                    else
+                        Commands.CopilotCommand.Execute(subcommand, Path.GetFullPath(_config.Database));
+                    break;
+
                 case "help":
                     PrintHelp();
                     break;
@@ -125,6 +133,9 @@ public sealed class MonitorApp : IAsyncDisposable
         table.AddRow("[bold]flaky[/]", "Review flaky test determinations");
         table.AddRow("[bold]add[/]", "Import builds from AzDO using a natural language prompt");
         table.AddRow("[bold]retry[/]", "Retry failure collection for builds that previously failed");
+        table.AddRow("[bold]copilot install[/]", "Register MCP server with copilot");
+        table.AddRow("[bold]copilot uninstall[/]", "Remove MCP server from copilot");
+        table.AddRow("[bold]copilot info[/]", "Show MCP server and skills paths");
         table.AddRow("[bold]help[/]", "Show this help message");
         table.AddRow("[bold]quit[/]", "Shut down the monitor");
         AnsiConsole.Write(table);
