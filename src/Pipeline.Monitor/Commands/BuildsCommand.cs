@@ -366,6 +366,7 @@ public static class BuildsCommand
         infoTable.AddRow("[bold]Queue[/]", item.QueueName.EscapeMarkup());
         infoTable.AddRow("[bold]Machine[/]", item.MachineName.EscapeMarkup());
         infoTable.AddRow("[bold]Status[/]", item.Status.EscapeMarkup());
+        infoTable.AddRow("[bold]Console Log[/]", $"[link={item.ConsoleUri}]{item.ConsoleUri.EscapeMarkup()}[/]");
         AnsiConsole.Write(infoTable);
         AnsiConsole.WriteLine();
 
@@ -383,12 +384,16 @@ public static class BuildsCommand
         }
 
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[dim]Press [bold]F[/] to fetch full log, any other key to return...[/]");
+        AnsiConsole.MarkupLine("[dim]Press [bold]F[/] to fetch full log, [bold]D[/] to download log, any other key to return...[/]");
         var key = Console.ReadKey(true);
 
         if (key.Key == ConsoleKey.F)
         {
             await FetchAndShowFullLogAsync(item);
+        }
+        else if (key.Key == ConsoleKey.D)
+        {
+            await DownloadLogAsync(item);
         }
     }
 
@@ -411,6 +416,7 @@ public static class BuildsCommand
             AnsiConsole.Write(logRule);
 
             var lines = consoleText.Split('\n');
+            var consoleWidth = Console.WindowWidth;
             if (lines.Length > 200)
             {
                 AnsiConsole.MarkupLine($"[dim]... ({lines.Length - 200} lines omitted, showing last 200) ...[/]");
@@ -419,12 +425,48 @@ public static class BuildsCommand
 
             foreach (var line in lines.TakeLast(200))
             {
-                AnsiConsole.WriteLine(line);
+                var trimmed = line.Length > consoleWidth ? line[..consoleWidth] : line;
+                AnsiConsole.WriteLine(trimmed);
             }
         }
         catch (Exception ex)
         {
             AnsiConsole.MarkupLine($"[red]Failed to fetch console log: {ex.Message.EscapeMarkup()}[/]");
+        }
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[dim]Press any key to return...[/]");
+        Console.ReadKey(true);
+    }
+
+    private static async Task DownloadLogAsync(HelixWorkItemRecord item)
+    {
+        AnsiConsole.WriteLine();
+        try
+        {
+            var downloadsDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "Downloads");
+            Directory.CreateDirectory(downloadsDir);
+
+            var safeName = string.Join("_", item.FriendlyName.Split(Path.GetInvalidFileNameChars()));
+            var fileName = $"helix-{safeName}-{item.WorkItemId}.log";
+            var filePath = Path.Combine(downloadsDir, fileName);
+
+            await AnsiConsole.Status()
+                .Spinner(Spinner.Known.Dots)
+                .StartAsync("Downloading console log...", async ctx =>
+                {
+                    using var httpClient = new HttpClient();
+                    var consoleText = await httpClient.GetStringAsync(item.ConsoleUri);
+                    await File.WriteAllTextAsync(filePath, consoleText);
+                });
+
+            AnsiConsole.MarkupLine($"[green]Downloaded to:[/] {filePath.EscapeMarkup()}");
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]Failed to download console log: {ex.Message.EscapeMarkup()}[/]");
         }
 
         AnsiConsole.WriteLine();
