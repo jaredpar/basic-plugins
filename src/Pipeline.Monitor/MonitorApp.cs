@@ -96,13 +96,6 @@ public sealed class MonitorApp : IAsyncDisposable
                     Commands.FlakyCommand.Execute(_db);
                     break;
 
-                case "console":
-                case "console --clean":
-                    await Commands.ConsoleCommand.ExecuteAsync(
-                        Path.GetFullPath(_config.Database),
-                        command == "console --clean");
-                    break;
-
                 case "help":
                     PrintHelp();
                     break;
@@ -132,7 +125,6 @@ public sealed class MonitorApp : IAsyncDisposable
         table.AddRow("[bold]flaky[/]", "Review flaky test determinations");
         table.AddRow("[bold]add[/]", "Import builds from AzDO using a natural language prompt");
         table.AddRow("[bold]retry[/]", "Retry failure collection for builds that previously failed");
-        table.AddRow("[bold]console[/]", "Launch copilot CLI with monitor tools (use 'console --clean' to reset)");
         table.AddRow("[bold]help[/]", "Show this help message");
         table.AddRow("[bold]quit[/]", "Shut down the monitor");
         AnsiConsole.Write(table);
