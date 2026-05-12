@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Pipeline.Core;
 
 namespace Pipeline.Monitor;
 
@@ -19,25 +20,11 @@ public sealed record MonitorConfig
         WriteIndented = true,
     };
 
-    /// <summary>
-    /// The app data directory: <c>$XDG_DATA_HOME/pipeline-monitor</c> or
-    /// <c>~/.local/share/pipeline-monitor</c> on Linux.
-    /// </summary>
-    public static string AppDataDirectory
-    {
-        get
-        {
-            var xdg = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
-            var baseDir = string.IsNullOrEmpty(xdg)
-                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share")
-                : xdg;
-            return Path.Combine(baseDir, "pipeline-monitor");
-        }
-    }
+    public static string AppDataDirectory => PipelineUtils.AppDataDirectory;
 
     public static string DefaultConfigPath => Path.Combine(AppDataDirectory, "config.json");
 
-    public static string DefaultDatabasePath => Path.Combine(AppDataDirectory, "monitor.db");
+    public static string DefaultDatabasePath => PipelineUtils.DefaultDatabasePath;
 
     [JsonPropertyName("pollIntervalMinutes")]
     public int PollIntervalMinutes { get; init; } = 5;
