@@ -1161,6 +1161,40 @@ public sealed class MonitorClient : IDisposable
         return list;
     }
 
+    /// <summary>
+    /// Searches for test failures whose name contains the given partial match string.
+    /// Returns distinct test names, the build they failed in, and the outcome.
+    /// </summary>
+    public List<MonitorTestSearchResult> SearchTestFailures(string namePattern, int limit = 50)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT DISTINCT tf.test_name, b.azdo_build_id, b.repository, tf.outcome, b.finish_time
+            FROM test_failures tf
+            JOIN builds b ON b.id = tf.build_id
+            WHERE tf.test_name LIKE @pattern
+            ORDER BY b.finish_time DESC
+            LIMIT @limit;
+            """;
+        cmd.Parameters.AddWithValue("@pattern", $"%{namePattern}%");
+        cmd.Parameters.AddWithValue("@limit", limit);
+
+        var list = new List<MonitorTestSearchResult>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            list.Add(new MonitorTestSearchResult
+            {
+                TestName = reader.GetString(0),
+                AzdoBuildId = reader.GetInt32(1),
+                Repository = reader.GetString(2),
+                Outcome = reader.GetString(3),
+                FinishTime = reader.IsDBNull(4) ? null : reader.GetString(4),
+            });
+        }
+        return list;
+    }
+
     public void Dispose() => _connection.Dispose();
 }
 
@@ -1323,4 +1357,13 @@ public sealed class MonitorTimelineIssueEntry
 
     [JsonPropertyName("category")]
     public string? Category { get; init; }
+}
+
+public sealed class MonitorTestSearchResult
+{
+    public required string TestName { get; init; }
+    public required int AzdoBuildId { get; init; }
+    public required string Repository { get; init; }
+    public required string Outcome { get; init; }
+    public string? FinishTime { get; init; }
 }

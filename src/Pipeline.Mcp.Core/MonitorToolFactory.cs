@@ -84,6 +84,15 @@ public static class MonitorToolFactory
                 "db_get_recent_triage_results",
                 "Get recent completed triage results with build info."),
 
+            AIFunctionFactory.Create(
+                (
+                    [Description("Partial test name to search for (case-insensitive substring match)")] string namePattern,
+                    [Description("Maximum number of results to return (default 50)")] int limit
+                ) =>
+                    JsonSerializer.Serialize(db.SearchTestFailures(namePattern, limit), s_jsonOptions),
+                "db_search_test_failures",
+                "Search for test failures by partial test name. Use this when you have a partial or approximate test name. Returns matching test names with their build and outcome info."),
+
             // --- Write operations ---
 
             AIFunctionFactory.Create(
