@@ -92,10 +92,6 @@ public sealed class MonitorApp : IAsyncDisposable
                     await Commands.RetryCommand.ExecuteAsync(_client, _db, _pipelineTools);
                     break;
 
-                case "console":
-                    await Commands.ConsoleCommand.ExecuteAsync(_client, _db, _pipelineTools);
-                    break;
-
                 case "flaky":
                     Commands.FlakyCommand.Execute(_db);
                     break;
@@ -128,7 +124,6 @@ public sealed class MonitorApp : IAsyncDisposable
         table.AddRow("[bold]builds[/]", "Show builds in the database");
         table.AddRow("[bold]flaky[/]", "Review flaky test determinations");
         table.AddRow("[bold]add[/]", "Import builds from AzDO using a natural language prompt");
-        table.AddRow("[bold]console[/]", "Start an interactive chat session with the LLM");
         table.AddRow("[bold]retry[/]", "Retry failure collection for builds that previously failed");
         table.AddRow("[bold]help[/]", "Show this help message");
         table.AddRow("[bold]quit[/]", "Shut down the monitor");
