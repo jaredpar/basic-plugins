@@ -9,7 +9,7 @@ namespace Pipeline.Monitor;
 /// </summary>
 public sealed class FailureCollectionJob
 {
-    private readonly MonitorDatabase _db;
+    private readonly MonitorClient _db;
     private readonly AzdoClient _azdoClient;
     private readonly HelixClient _helixClient;
     private readonly MonitorLog _log;
@@ -17,7 +17,7 @@ public sealed class FailureCollectionJob
     private readonly CancellationTokenSource _cts = new();
     private const string Source = "collector";
 
-    public FailureCollectionJob(MonitorDatabase db, AzdoClient azdoClient, HelixClient helixClient, MonitorLog log)
+    public FailureCollectionJob(MonitorClient db, AzdoClient azdoClient, HelixClient helixClient, MonitorLog log)
     {
         _db = db;
         _azdoClient = azdoClient;
@@ -74,7 +74,7 @@ public sealed class FailureCollectionJob
         _log.Info(Source, "Failure collection job stopped");
     }
 
-    private async Task ProcessTargetAsync(CollectionTarget target, CancellationToken cancellationToken)
+    private async Task ProcessTargetAsync(MonitorCollectionTarget target, CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken);
         try
@@ -101,7 +101,7 @@ public sealed class FailureCollectionJob
     /// <summary>
     /// Fetches AzDO test failures and timeline data for a build. Returns true on success.
     /// </summary>
-    private async Task<bool> CollectAzdoTestFailuresAsync(CollectionTarget target)
+    private async Task<bool> CollectAzdoTestFailuresAsync(MonitorCollectionTarget target)
     {
         try
         {
@@ -136,7 +136,7 @@ public sealed class FailureCollectionJob
 
                 var failedJobs = timeline.Records
                     .Where(r => r.RecordType == "Job" && r.Result is not null and not "succeeded")
-                    .Select(r => new TimelineJobEntry
+                    .Select(r => new MonitorTimelineJobEntry
                     {
                         Name = r.Name,
                         Result = r.Result!,
@@ -147,7 +147,7 @@ public sealed class FailureCollectionJob
                 var issues = timeline.Records
                     .SelectMany(r => r.Issues)
                     .Where(i => i.Type is "error" or "warning")
-                    .Select(i => new TimelineIssueEntry
+                    .Select(i => new MonitorTimelineIssueEntry
                     {
                         Type = i.Type,
                         Message = i.Message,
@@ -155,7 +155,7 @@ public sealed class FailureCollectionJob
                     })
                     .ToList();
 
-                var summary = new TimelineSummary
+                var summary = new MonitorTimelineSummary
                 {
                     FailedJobs = failedJobs,
                     Issues = issues,
@@ -196,7 +196,7 @@ public sealed class FailureCollectionJob
     /// Fetches Helix work items for a build using job names from AzDO test result comments.
     /// If no Helix comments exist, the build didn't use Helix and collection is skipped.
     /// </summary>
-    private async Task<HelixCollectionResult> CollectHelixWorkItemsAsync(CollectionTarget target)
+    private async Task<HelixCollectionResult> CollectHelixWorkItemsAsync(MonitorCollectionTarget target)
     {
         try
         {
@@ -268,3 +268,5 @@ public sealed class FailureCollectionJob
         }
     }
 }
+
+

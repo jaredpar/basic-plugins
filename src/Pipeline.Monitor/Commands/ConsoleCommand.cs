@@ -1,6 +1,8 @@
 using GitHub.Copilot.SDK;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
+using Pipeline.Core;
+using Pipeline.Mcp.Core;
 
 namespace Pipeline.Monitor.Commands;
 
@@ -12,11 +14,11 @@ public static class ConsoleCommand
 {
     public static async Task ExecuteAsync(
         CopilotClient client,
-        MonitorDatabase db,
+        MonitorClient db,
         List<AIFunction> pipelineTools)
     {
         var tools = new List<AIFunction>(pipelineTools);
-        tools.AddRange(DatabaseToolFactory.Create(db));
+        tools.AddRange(MonitorToolFactory.Create(db));
 
         var systemMessage = """
             You are a pipeline investigation assistant. You have access to:
@@ -101,3 +103,4 @@ public static class ConsoleCommand
         }
     }
 }
+

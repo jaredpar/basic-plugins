@@ -1,15 +1,16 @@
 using System.ComponentModel;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
+using Pipeline.Core;
 
-namespace Pipeline.Monitor;
+namespace Pipeline.Mcp.Core;
 
 /// <summary>
 /// Creates <see cref="AIFunction"/> instances that expose the monitor SQLite database
 /// to AI agents. Allows agents to query and record build, test failure, helix, and
 /// flaky test data without hand-wiring tool methods in each agent.
 /// </summary>
-public static class DatabaseToolFactory
+public static class MonitorToolFactory
 {
     private static readonly JsonSerializerOptions s_jsonOptions = new()
     {
@@ -17,7 +18,7 @@ public static class DatabaseToolFactory
         PropertyNameCaseInsensitive = true,
     };
 
-    public static List<AIFunction> Create(MonitorDatabase db)
+    public static List<AIFunction> Create(MonitorClient db)
     {
         return
         [
@@ -152,3 +153,4 @@ public static class DatabaseToolFactory
         public string? Comment { get; init; }
     }
 }
+

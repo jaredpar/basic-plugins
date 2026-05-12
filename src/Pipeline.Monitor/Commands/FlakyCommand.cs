@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Spectre.Console;
+using Pipeline.Core;
 
 namespace Pipeline.Monitor.Commands;
 
@@ -10,7 +11,7 @@ namespace Pipeline.Monitor.Commands;
 /// </summary>
 public static class FlakyCommand
 {
-    public static void Execute(MonitorDatabase db)
+    public static void Execute(MonitorClient db)
     {
         while (true)
         {
@@ -38,7 +39,7 @@ public static class FlakyCommand
         }
     }
 
-    private static void ShowFlakyDetail(MonitorDatabase db, FlakyTestRecord flaky)
+    private static void ShowFlakyDetail(MonitorClient db, MonitorFlakyTestRecord flaky)
     {
         while (true)
         {
@@ -154,7 +155,7 @@ public static class FlakyCommand
         }
     }
 
-    private static void FileIssue(MonitorDatabase db, FlakyTestRecord flaky, List<FixRequest> fixes)
+    private static void FileIssue(MonitorClient db, MonitorFlakyTestRecord flaky, List<MonitorFixRequest> fixes)
     {
         var title = $"Flaky test: {flaky.TestName}";
         var bodyParts = new List<string>
@@ -254,7 +255,7 @@ public static class FlakyCommand
         WaitForEsc();
     }
 
-    private static void SpawnFixSession(FlakyTestRecord flaky, List<FixRequest> fixes)
+    private static void SpawnFixSession(MonitorFlakyTestRecord flaky, List<MonitorFixRequest> fixes)
     {
         var diagnosis = fixes.FirstOrDefault()?.Diagnosis ?? "Unknown";
         var proposedFix = fixes.FirstOrDefault()?.ProposedFix ?? "";
@@ -370,3 +371,5 @@ public static class FlakyCommand
             : string.Concat(singleLine.AsSpan(0, maxLength), "…");
     }
 }
+
+

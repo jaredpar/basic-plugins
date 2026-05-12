@@ -1,6 +1,7 @@
 using GitHub.Copilot.SDK;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
+using Pipeline.Core;
 
 namespace Pipeline.Monitor.Commands;
 
@@ -10,7 +11,7 @@ namespace Pipeline.Monitor.Commands;
 /// </summary>
 public static class RetryCommand
 {
-    public static async Task ExecuteAsync(CopilotClient client, MonitorDatabase db, List<AIFunction> pipelineTools)
+    public static async Task ExecuteAsync(CopilotClient client, MonitorClient db, List<AIFunction> pipelineTools)
     {
         var prompt = AnsiConsole.Prompt(
             new TextPrompt<string>("[bold]Describe which builds to retry:[/] ")
@@ -51,3 +52,4 @@ public static class RetryCommand
         AnsiConsole.MarkupLine($"[green]Reset {reset} builds for retry[/] ({notFailed} were not in failed state). Background job will pick them up shortly.");
     }
 }
+

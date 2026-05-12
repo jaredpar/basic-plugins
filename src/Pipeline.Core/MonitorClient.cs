@@ -1,25 +1,26 @@
+using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
 
-namespace Pipeline.Monitor;
+namespace Pipeline.Core;
 
 /// <summary>
 /// SQLite data access layer for the monitor service. Tracks builds, test failures,
 /// triage requests, and filed issues.
 /// </summary>
-public sealed class MonitorDatabase : IDisposable
+public sealed class MonitorClient : IDisposable
 {
     private readonly SqliteConnection _connection;
 
-    private MonitorDatabase(SqliteConnection connection)
+    private MonitorClient(SqliteConnection connection)
     {
         _connection = connection;
     }
 
-    public static MonitorDatabase Open(string databasePath)
+    public static MonitorClient Open(string databasePath)
     {
         var connection = new SqliteConnection($"Data Source={databasePath}");
         connection.Open();
-        var db = new MonitorDatabase(connection);
+        var db = new MonitorClient(connection);
         db.EnsureSchema();
         return db;
     }
@@ -220,7 +221,7 @@ public sealed class MonitorDatabase : IDisposable
     /// <summary>
     /// Gets the timeline summary for a build by AzDO build ID. Returns null if not yet collected.
     /// </summary>
-    public TimelineSummary? GetTimelineData(int azdoBuildId)
+    public MonitorTimelineSummary? GetTimelineData(int azdoBuildId)
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = "SELECT timeline_json FROM builds WHERE azdo_build_id = @id";
@@ -228,7 +229,7 @@ public sealed class MonitorDatabase : IDisposable
         var result = cmd.ExecuteScalar();
         if (result is string json)
         {
-            return System.Text.Json.JsonSerializer.Deserialize<TimelineSummary>(json);
+            return System.Text.Json.JsonSerializer.Deserialize<MonitorTimelineSummary>(json);
         }
         return null;
     }
@@ -351,7 +352,7 @@ public sealed class MonitorDatabase : IDisposable
     /// <summary>
     /// Gets all pending triage requests.
     /// </summary>
-    public List<TriageRequest> GetPendingTriageRequests()
+    public List<MonitorTriageRequest> GetPendingTriageRequests()
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
@@ -362,11 +363,11 @@ public sealed class MonitorDatabase : IDisposable
             ORDER BY tr.created_at;
             """;
 
-        var list = new List<TriageRequest>();
+        var list = new List<MonitorTriageRequest>();
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            list.Add(new TriageRequest
+            list.Add(new MonitorTriageRequest
             {
                 Id = reader.GetInt64(0),
                 BuildId = reader.GetInt64(1),
@@ -429,7 +430,7 @@ public sealed class MonitorDatabase : IDisposable
     /// Gets the triage result and chat log for a build by AzDO build ID.
     /// Returns null if no completed triage exists.
     /// </summary>
-    public TriageDetail? GetTriageDetailForBuild(int azdoBuildId)
+    public MonitorTriageDetail? GetTriageDetailForBuild(int azdoBuildId)
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
@@ -448,7 +449,7 @@ public sealed class MonitorDatabase : IDisposable
         if (!reader.Read())
             return null;
 
-        return new TriageDetail
+        return new MonitorTriageDetail
         {
             TriageRequestId = reader.GetInt64(0),
             Status = reader.GetString(1),
@@ -507,7 +508,7 @@ public sealed class MonitorDatabase : IDisposable
     /// <summary>
     /// Gets all pending fix requests.
     /// </summary>
-    public List<FixRequest> GetPendingFixRequests()
+    public List<MonitorFixRequest> GetPendingFixRequests()
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
@@ -517,11 +518,11 @@ public sealed class MonitorDatabase : IDisposable
             ORDER BY created_at;
             """;
 
-        var list = new List<FixRequest>();
+        var list = new List<MonitorFixRequest>();
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            list.Add(new FixRequest
+            list.Add(new MonitorFixRequest
             {
                 Id = reader.GetInt64(0),
                 TriageRequestId = reader.GetInt64(1),
@@ -587,7 +588,7 @@ public sealed class MonitorDatabase : IDisposable
     /// <summary>
     /// Gets builds that are ready for flaky analysis: AzDO data collected, has test failures, not yet triaged.
     /// </summary>
-    public List<TriageTarget> GetBuildsForTriaging(int limit = 1)
+    public List<MonitorTriageTarget> GetBuildsForTriaging(int limit = 1)
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
@@ -602,11 +603,11 @@ public sealed class MonitorDatabase : IDisposable
             """;
         cmd.Parameters.AddWithValue("@limit", limit);
 
-        var list = new List<TriageTarget>();
+        var list = new List<MonitorTriageTarget>();
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            list.Add(new TriageTarget
+            list.Add(new MonitorTriageTarget
             {
                 BuildId = reader.GetInt64(0),
                 AzdoBuildId = reader.GetInt32(1),
@@ -634,7 +635,7 @@ public sealed class MonitorDatabase : IDisposable
     /// <summary>
     /// Gets the failure history for a test across all builds. Returns build IDs, results, and dates.
     /// </summary>
-    public List<TestHistoryEntry> GetTestHistoryForName(string testName, string repository, int limit = 20)
+    public List<MonitorTestHistoryEntry> GetTestHistoryForName(string testName, string repository, int limit = 20)
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
@@ -649,11 +650,11 @@ public sealed class MonitorDatabase : IDisposable
         cmd.Parameters.AddWithValue("@repository", repository);
         cmd.Parameters.AddWithValue("@limit", limit);
 
-        var list = new List<TestHistoryEntry>();
+        var list = new List<MonitorTestHistoryEntry>();
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            list.Add(new TestHistoryEntry
+            list.Add(new MonitorTestHistoryEntry
             {
                 AzdoBuildId = reader.GetInt32(0),
                 BuildResult = reader.IsDBNull(1) ? null : reader.GetString(1),
@@ -669,7 +670,7 @@ public sealed class MonitorDatabase : IDisposable
     /// <summary>
     /// Gets the flaky test record for a test name and repository, if one exists.
     /// </summary>
-    public FlakyTestRecord? GetFlakyTest(string testName, string repository)
+    public MonitorFlakyTestRecord? GetFlakyTest(string testName, string repository)
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
@@ -683,7 +684,7 @@ public sealed class MonitorDatabase : IDisposable
         using var reader = cmd.ExecuteReader();
         if (reader.Read())
         {
-            return new FlakyTestRecord
+            return new MonitorFlakyTestRecord
             {
                 Id = reader.GetInt64(0),
                 TestName = reader.GetString(1),
@@ -702,7 +703,7 @@ public sealed class MonitorDatabase : IDisposable
     /// <summary>
     /// Gets all tracked flaky tests, ordered by most recently seen.
     /// </summary>
-    public List<FlakyTestRecord> GetAllFlakyTests()
+    public List<MonitorFlakyTestRecord> GetAllFlakyTests()
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
@@ -711,11 +712,11 @@ public sealed class MonitorDatabase : IDisposable
             ORDER BY last_seen DESC;
             """;
 
-        var list = new List<FlakyTestRecord>();
+        var list = new List<MonitorFlakyTestRecord>();
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            list.Add(new FlakyTestRecord
+            list.Add(new MonitorFlakyTestRecord
             {
                 Id = reader.GetInt64(0),
                 TestName = reader.GetString(1),
@@ -734,7 +735,7 @@ public sealed class MonitorDatabase : IDisposable
     /// <summary>
     /// Gets recent triage results (completed triage requests) with build info.
     /// </summary>
-    public List<TriageResultRecord> GetRecentTriageResults(int limit = 50)
+    public List<MonitorTriageResultRecord> GetRecentTriageResults(int limit = 50)
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
@@ -748,11 +749,11 @@ public sealed class MonitorDatabase : IDisposable
             """;
         cmd.Parameters.AddWithValue("@limit", limit);
 
-        var list = new List<TriageResultRecord>();
+        var list = new List<MonitorTriageResultRecord>();
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            list.Add(new TriageResultRecord
+            list.Add(new MonitorTriageResultRecord
             {
                 Id = reader.GetInt64(0),
                 BuildId = reader.GetInt64(1),
@@ -786,7 +787,7 @@ public sealed class MonitorDatabase : IDisposable
     /// <summary>
     /// Gets fix requests associated with a specific flaky test.
     /// </summary>
-    public List<FixRequest> GetFixRequestsForTest(string testName, string repository)
+    public List<MonitorFixRequest> GetFixRequestsForTest(string testName, string repository)
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
@@ -798,11 +799,11 @@ public sealed class MonitorDatabase : IDisposable
         cmd.Parameters.AddWithValue("@testName", testName);
         cmd.Parameters.AddWithValue("@repository", repository);
 
-        var list = new List<FixRequest>();
+        var list = new List<MonitorFixRequest>();
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            list.Add(new FixRequest
+            list.Add(new MonitorFixRequest
             {
                 Id = reader.GetInt64(0),
                 TriageRequestId = reader.GetInt64(1),
@@ -815,7 +816,7 @@ public sealed class MonitorDatabase : IDisposable
         }
         return list;
     }
-    public List<BuildRecord> GetRecentBuilds(int limit = 50, bool failedOnly = false)
+    public List<MonitorBuildRecord> GetRecentBuilds(int limit = 50, bool failedOnly = false)
     {
         using var cmd = _connection.CreateCommand();
         var whereClause = failedOnly ? "WHERE b.result = 'failed'" : "";
@@ -832,11 +833,11 @@ public sealed class MonitorDatabase : IDisposable
             """;
         cmd.Parameters.AddWithValue("@limit", limit);
 
-        var list = new List<BuildRecord>();
+        var list = new List<MonitorBuildRecord>();
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            list.Add(new BuildRecord
+            list.Add(new MonitorBuildRecord
             {
                 AzdoBuildId = reader.GetInt32(0),
                 Repository = reader.GetString(1),
@@ -859,7 +860,7 @@ public sealed class MonitorDatabase : IDisposable
     /// <summary>
     /// Gets a single build record by its AzDO build ID, or null if not found.
     /// </summary>
-    public BuildRecord? GetBuildByAzdoId(int azdoBuildId)
+    public MonitorBuildRecord? GetBuildByAzdoId(int azdoBuildId)
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
@@ -876,7 +877,7 @@ public sealed class MonitorDatabase : IDisposable
         using var reader = cmd.ExecuteReader();
         if (reader.Read())
         {
-            return new BuildRecord
+            return new MonitorBuildRecord
             {
                 AzdoBuildId = reader.GetInt32(0),
                 Repository = reader.GetString(1),
@@ -899,7 +900,7 @@ public sealed class MonitorDatabase : IDisposable
     /// <summary>
     /// Gets builds that need failure data collection (state = pending, not recently attempted).
     /// </summary>
-    public List<CollectionTarget> GetPendingCollectionTargets(int limit = 4)
+    public List<MonitorCollectionTarget> GetPendingCollectionTargets(int limit = 4)
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
@@ -914,11 +915,11 @@ public sealed class MonitorDatabase : IDisposable
             """;
         cmd.Parameters.AddWithValue("@limit", limit);
 
-        var list = new List<CollectionTarget>();
+        var list = new List<MonitorCollectionTarget>();
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            list.Add(new CollectionTarget
+            list.Add(new MonitorCollectionTarget
             {
                 BuildId = reader.GetInt64(0),
                 AzdoBuildId = reader.GetInt32(1),
@@ -1097,7 +1098,7 @@ public sealed class MonitorDatabase : IDisposable
     /// <summary>
     /// Gets test failures for a build by its AzDO build ID.
     /// </summary>
-    public List<TestFailureRecord> GetTestFailuresForBuild(int azdoBuildId)
+    public List<MonitorTestFailureRecord> GetTestFailuresForBuild(int azdoBuildId)
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
@@ -1109,11 +1110,11 @@ public sealed class MonitorDatabase : IDisposable
             """;
         cmd.Parameters.AddWithValue("@id", azdoBuildId);
 
-        var list = new List<TestFailureRecord>();
+        var list = new List<MonitorTestFailureRecord>();
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            list.Add(new TestFailureRecord
+            list.Add(new MonitorTestFailureRecord
             {
                 TestName = reader.GetString(0),
                 Outcome = reader.GetString(1),
@@ -1127,7 +1128,7 @@ public sealed class MonitorDatabase : IDisposable
     /// <summary>
     /// Gets helix work items for a build by its AzDO build ID.
     /// </summary>
-    public List<HelixWorkItemRecord> GetHelixWorkItemsForBuild(int azdoBuildId)
+    public List<MonitorHelixWorkItemRecord> GetHelixWorkItemsForBuild(int azdoBuildId)
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
@@ -1140,11 +1141,11 @@ public sealed class MonitorDatabase : IDisposable
             """;
         cmd.Parameters.AddWithValue("@id", azdoBuildId);
 
-        var list = new List<HelixWorkItemRecord>();
+        var list = new List<MonitorHelixWorkItemRecord>();
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            list.Add(new HelixWorkItemRecord
+            list.Add(new MonitorHelixWorkItemRecord
             {
                 FriendlyName = reader.GetString(0),
                 ExitCode = reader.GetInt32(1),
@@ -1163,7 +1164,7 @@ public sealed class MonitorDatabase : IDisposable
     public void Dispose() => _connection.Dispose();
 }
 
-public sealed class TriageRequest
+public sealed class MonitorTriageRequest
 {
     public required long Id { get; init; }
     public required long BuildId { get; init; }
@@ -1172,7 +1173,7 @@ public sealed class TriageRequest
     public required int AzdoBuildId { get; init; }
 }
 
-public sealed class FixRequest
+public sealed class MonitorFixRequest
 {
     public required long Id { get; init; }
     public required long TriageRequestId { get; init; }
@@ -1183,7 +1184,7 @@ public sealed class FixRequest
     public string? IssueUrl { get; init; }
 }
 
-public sealed class BuildRecord
+public sealed class MonitorBuildRecord
 {
     public required int AzdoBuildId { get; init; }
     public required string Repository { get; init; }
@@ -1200,7 +1201,7 @@ public sealed class BuildRecord
     public int HelixFailureCount { get; init; }
 }
 
-public sealed class CollectionTarget
+public sealed class MonitorCollectionTarget
 {
     public required long BuildId { get; init; }
     public required int AzdoBuildId { get; init; }
@@ -1211,7 +1212,7 @@ public sealed class CollectionTarget
     public string? FinishTime { get; init; }
 }
 
-public sealed class TestFailureRecord
+public sealed class MonitorTestFailureRecord
 {
     public required string TestName { get; init; }
     public required string Outcome { get; init; }
@@ -1219,7 +1220,7 @@ public sealed class TestFailureRecord
     public string? StackTrace { get; init; }
 }
 
-public sealed class HelixWorkItemRecord
+public sealed class MonitorHelixWorkItemRecord
 {
     public required string FriendlyName { get; init; }
     public required int ExitCode { get; init; }
@@ -1232,7 +1233,7 @@ public sealed class HelixWorkItemRecord
     public string? ConsoleSummary { get; init; }
 }
 
-public sealed class TriageTarget
+public sealed class MonitorTriageTarget
 {
     public required long BuildId { get; init; }
     public required int AzdoBuildId { get; init; }
@@ -1242,7 +1243,7 @@ public sealed class TriageTarget
     public string? TimelineJson { get; init; }
 }
 
-public sealed class TestHistoryEntry
+public sealed class MonitorTestHistoryEntry
 {
     public required int AzdoBuildId { get; init; }
     public string? BuildResult { get; init; }
@@ -1252,7 +1253,7 @@ public sealed class TestHistoryEntry
     public string? ErrorMessage { get; init; }
 }
 
-public sealed class FlakyTestRecord
+public sealed class MonitorFlakyTestRecord
 {
     public required long Id { get; init; }
     public required string TestName { get; init; }
@@ -1265,7 +1266,7 @@ public sealed class FlakyTestRecord
     public required string LastSeen { get; init; }
 }
 
-public sealed class TriageResultRecord
+public sealed class MonitorTriageResultRecord
 {
     public required long Id { get; init; }
     public required long BuildId { get; init; }
@@ -1277,7 +1278,7 @@ public sealed class TriageResultRecord
     public required string SourceBranch { get; init; }
 }
 
-public sealed class TriageDetail
+public sealed class MonitorTriageDetail
 {
     public required long TriageRequestId { get; init; }
     public required string Status { get; init; }
@@ -1285,4 +1286,41 @@ public sealed class TriageDetail
     public required string CreatedAt { get; init; }
     public string? CompletedAt { get; init; }
     public string? ChatLog { get; init; }
+}
+
+/// <summary>
+/// Summary of AzDO build timeline data stored as a JSON blob on the build record.
+/// Contains only diagnostic-relevant information: failed jobs and error/warning issues.
+/// </summary>
+public sealed class MonitorTimelineSummary
+{
+    [JsonPropertyName("failedJobs")]
+    public List<MonitorTimelineJobEntry> FailedJobs { get; init; } = [];
+
+    [JsonPropertyName("issues")]
+    public List<MonitorTimelineIssueEntry> Issues { get; init; } = [];
+}
+
+public sealed class MonitorTimelineJobEntry
+{
+    [JsonPropertyName("name")]
+    public required string Name { get; init; }
+
+    [JsonPropertyName("result")]
+    public required string Result { get; init; }
+
+    [JsonPropertyName("workerName")]
+    public string? WorkerName { get; init; }
+}
+
+public sealed class MonitorTimelineIssueEntry
+{
+    [JsonPropertyName("type")]
+    public required string Type { get; init; }
+
+    [JsonPropertyName("message")]
+    public required string Message { get; init; }
+
+    [JsonPropertyName("category")]
+    public string? Category { get; init; }
 }

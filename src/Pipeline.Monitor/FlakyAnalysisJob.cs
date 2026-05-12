@@ -2,6 +2,8 @@ using System.ComponentModel;
 using System.Text.Json;
 using GitHub.Copilot.SDK;
 using Microsoft.Extensions.AI;
+using Pipeline.Core;
+using Pipeline.Mcp.Core;
 
 namespace Pipeline.Monitor;
 
@@ -12,13 +14,13 @@ namespace Pipeline.Monitor;
 public sealed class FlakyAnalysisJob
 {
     private readonly CopilotClient _client;
-    private readonly MonitorDatabase _db;
+    private readonly MonitorClient _db;
     private readonly MonitorLog _log;
     private readonly List<AIFunction> _pipelineTools;
     private readonly CancellationTokenSource _cts = new();
     private const string Source = "flaky";
 
-    public FlakyAnalysisJob(CopilotClient client, MonitorDatabase db, MonitorLog log, List<AIFunction> pipelineTools)
+    public FlakyAnalysisJob(CopilotClient client, MonitorClient db, MonitorLog log, List<AIFunction> pipelineTools)
     {
         _client = client;
         _db = db;
@@ -73,7 +75,7 @@ public sealed class FlakyAnalysisJob
 
     private const int MaxTestFailures = 10;
 
-    private async Task AnalyzeBuildAsync(TriageTarget target, CancellationToken cancellationToken)
+    private async Task AnalyzeBuildAsync(MonitorTriageTarget target, CancellationToken cancellationToken)
     {
         _log.Info(Source, $"Analyzing build {target.AzdoBuildId} ({target.Repository})");
 
@@ -140,7 +142,7 @@ public sealed class FlakyAnalysisJob
         {
             try
             {
-                var timeline = JsonSerializer.Deserialize<TimelineSummary>(target.TimelineJson);
+                var timeline = JsonSerializer.Deserialize<MonitorTimelineSummary>(target.TimelineJson);
                 if (timeline is not null)
                 {
                     var jobLines = timeline.FailedJobs.Select(j => $"- {j.Name}: {j.Result} (worker: {j.WorkerName ?? "unknown"})");
@@ -278,7 +280,7 @@ public sealed class FlakyAnalysisJob
                     "Record whether a test failure is flaky, with diagnosis, rationale, and optional fix"),
             };
             tools.AddRange(_pipelineTools);
-            tools.AddRange(DatabaseToolFactory.Create(_db));
+            tools.AddRange(MonitorToolFactory.Create(_db));
 
             await using var session = await _client.CreateSessionAsync(new SessionConfig
             {
@@ -395,3 +397,5 @@ public sealed class FlakyAnalysisJob
         public bool? Success { get; init; }
     }
 }
+
+

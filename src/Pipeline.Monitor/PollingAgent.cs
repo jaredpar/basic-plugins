@@ -1,5 +1,7 @@
 using GitHub.Copilot.SDK;
 using Microsoft.Extensions.AI;
+using Pipeline.Core;
+using Pipeline.Mcp.Core;
 
 namespace Pipeline.Monitor;
 
@@ -11,7 +13,7 @@ namespace Pipeline.Monitor;
 public sealed class PollingAgent : IAsyncDisposable
 {
     private readonly CopilotClient _client;
-    private readonly MonitorDatabase _db;
+    private readonly MonitorClient _db;
     private readonly MonitorConfig _config;
     private readonly MonitorLog _log;
     private readonly List<AIFunction> _pipelineTools;
@@ -22,7 +24,7 @@ public sealed class PollingAgent : IAsyncDisposable
 
     public PollingAgent(
         CopilotClient client,
-        MonitorDatabase db,
+        MonitorClient db,
         MonitorConfig config,
         MonitorLog log,
         List<AIFunction> pipelineTools)
@@ -108,7 +110,7 @@ public sealed class PollingAgent : IAsyncDisposable
     private List<AIFunction> CreateTools()
     {
         var tools = new List<AIFunction>(_pipelineTools);
-        tools.AddRange(DatabaseToolFactory.Create(_db));
+        tools.AddRange(MonitorToolFactory.Create(_db));
         return tools;
     }
 
@@ -121,3 +123,4 @@ public sealed class PollingAgent : IAsyncDisposable
         }
     }
 }
+

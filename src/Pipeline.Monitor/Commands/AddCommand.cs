@@ -1,6 +1,7 @@
 using GitHub.Copilot.SDK;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
+using Pipeline.Core;
 
 namespace Pipeline.Monitor.Commands;
 
@@ -10,7 +11,7 @@ namespace Pipeline.Monitor.Commands;
 /// </summary>
 public static class AddCommand
 {
-    public static async Task ExecuteAsync(CopilotClient client, MonitorDatabase db, List<AIFunction> pipelineTools)
+    public static async Task ExecuteAsync(CopilotClient client, MonitorClient db, List<AIFunction> pipelineTools)
     {
         var prompt = AnsiConsole.Prompt(
             new TextPrompt<string>("[bold]Describe what builds to add:[/] ")
@@ -61,3 +62,4 @@ public static class AddCommand
         AnsiConsole.MarkupLine($"[green]Added {imported} builds[/] ({skipped} already existed). Failure data will be collected in the background.");
     }
 }
+

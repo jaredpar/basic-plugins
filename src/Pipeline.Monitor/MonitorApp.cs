@@ -12,7 +12,7 @@ namespace Pipeline.Monitor;
 public sealed class MonitorApp : IAsyncDisposable
 {
     private readonly MonitorConfig _config;
-    private readonly MonitorDatabase _db;
+    private readonly MonitorClient _db;
     private readonly AzdoClient _azdoClient;
     private readonly HelixClient _helixClient;
     private readonly CopilotClient _client;
@@ -26,7 +26,7 @@ public sealed class MonitorApp : IAsyncDisposable
     public MonitorApp(MonitorConfig config)
     {
         _config = config;
-        _db = MonitorDatabase.Open(config.Database);
+        _db = MonitorClient.Open(config.Database);
         _log = new MonitorLog();
 
         var credential = PipelineUtils.CreateCredential();
@@ -148,3 +148,4 @@ public sealed class MonitorApp : IAsyncDisposable
         _cts.Dispose();
     }
 }
+

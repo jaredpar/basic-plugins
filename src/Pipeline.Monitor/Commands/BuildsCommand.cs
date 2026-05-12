@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Spectre.Console;
+using Pipeline.Core;
 
 namespace Pipeline.Monitor.Commands;
 
@@ -11,7 +12,7 @@ namespace Pipeline.Monitor.Commands;
 /// </summary>
 public static class BuildsCommand
 {
-    public static async Task ExecuteAsync(MonitorDatabase db)
+    public static async Task ExecuteAsync(MonitorClient db)
     {
         while (true)
         {
@@ -103,7 +104,7 @@ public static class BuildsCommand
         }
     }
 
-    private static async Task ShowBuildDetailAsync(MonitorDatabase db, BuildRecord build)
+    private static async Task ShowBuildDetailAsync(MonitorClient db, MonitorBuildRecord build)
     {
         var helixItems = db.GetHelixWorkItemsForBuild(build.AzdoBuildId);
         var triageDetail = db.GetTriageDetailForBuild(build.AzdoBuildId);
@@ -334,7 +335,7 @@ public static class BuildsCommand
 
     // --- Helix drill-down ---
 
-    private static async Task ShowHelixDrillDownAsync(List<HelixWorkItemRecord> helixItems)
+    private static async Task ShowHelixDrillDownAsync(List<MonitorHelixWorkItemRecord> helixItems)
     {
         while (true)
         {
@@ -351,7 +352,7 @@ public static class BuildsCommand
         }
     }
 
-    private static async Task ShowHelixConsoleAsync(HelixWorkItemRecord item)
+    private static async Task ShowHelixConsoleAsync(MonitorHelixWorkItemRecord item)
     {
         AnsiConsole.Clear();
 
@@ -407,7 +408,7 @@ public static class BuildsCommand
         }
     }
 
-    private static async Task FetchAndShowFullLogAsync(HelixWorkItemRecord item)
+    private static async Task FetchAndShowFullLogAsync(MonitorHelixWorkItemRecord item)
     {
         AnsiConsole.WriteLine();
         try
@@ -447,7 +448,7 @@ public static class BuildsCommand
         Console.ReadKey(true);
     }
 
-    private static async Task DownloadLogAsync(HelixWorkItemRecord item)
+    private static async Task DownloadLogAsync(MonitorHelixWorkItemRecord item)
     {
         AnsiConsole.WriteLine();
         try
@@ -484,7 +485,7 @@ public static class BuildsCommand
 
     // --- Flaky analysis drill-down ---
 
-    private static void ShowFlakyAnalysis(TriageDetail detail)
+    private static void ShowFlakyAnalysis(MonitorTriageDetail detail)
     {
         AnsiConsole.Clear();
 
@@ -685,3 +686,5 @@ public static class BuildsCommand
         public bool? Success { get; init; }
     }
 }
+
+
