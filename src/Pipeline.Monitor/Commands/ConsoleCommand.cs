@@ -12,6 +12,8 @@ namespace Pipeline.Monitor.Commands;
 /// </summary>
 public static class ConsoleCommand
 {
+    private enum OutputMode { None, Message, Reasoning, Tool }
+
     public static async Task ExecuteAsync(
         CopilotClient client,
         MonitorClient db,
@@ -44,7 +46,7 @@ public static class ConsoleCommand
             SkillDirectories = SessionConfigHelper.SkillDirectories,
         });
 
-        AnsiConsole.MarkupLine("[bold blue]Console session started[/] (model: claude-opus-4.7)");
+        AnsiConsole.MarkupLine("[bold blue]Console session started[/] (model: claude-opus-4.6)");
         AnsiConsole.MarkupLine("[dim]Type \"quit\" to return to the main menu.[/]");
         AnsiConsole.WriteLine();
 
@@ -64,7 +66,26 @@ public static class ConsoleCommand
             }
 
             var done = new TaskCompletionSource();
-            var hadContent = false;
+            var currentMode = OutputMode.None;
+
+            void SwitchMode(OutputMode newMode)
+            {
+                if (currentMode == newMode)
+                    return;
+
+                // End the previous mode
+                if (currentMode != OutputMode.None)
+                {
+                    Console.ResetColor();
+                    Console.WriteLine();
+                }
+
+                // Start the new mode
+                if (newMode == OutputMode.Reasoning)
+                    Console.ForegroundColor = ConsoleColor.DarkYellow;
+
+                currentMode = newMode;
+            }
 
             using var sub = session.On(evt =>
             {
@@ -73,18 +94,27 @@ public static class ConsoleCommand
                     case AssistantMessageDeltaEvent delta:
                         if (delta.Data.DeltaContent is { Length: > 0 } chunk)
                         {
-                            if (!hadContent)
-                            {
-                                Console.WriteLine();
-                                hadContent = true;
-                            }
+                            SwitchMode(OutputMode.Message);
                             Console.Write(chunk);
                         }
                         break;
+                    case AssistantReasoningDeltaEvent reasoningDelta:
+                        if (reasoningDelta.Data.DeltaContent is { Length: > 0 } reasoningChunk)
+                        {
+                            SwitchMode(OutputMode.Reasoning);
+                            Console.Write(reasoningChunk);
+                        }
+                        break;
+                    case AssistantMessageEvent:
+                    case AssistantReasoningEvent:
+                    case ToolExecutionCompleteEvent:
+                        break;
                     case ToolExecutionStartEvent tool:
+                        SwitchMode(OutputMode.Tool);
                         AnsiConsole.MarkupLine($"[dim][tool] {tool.Data.ToolName.EscapeMarkup()}...[/]");
                         break;
                     case SessionErrorEvent err:
+                        SwitchMode(OutputMode.None);
                         AnsiConsole.MarkupLine($"[red][error] {err.Data.Message.EscapeMarkup()}[/]");
                         done.TrySetResult();
                         break;
@@ -97,10 +127,10 @@ public static class ConsoleCommand
             await session.SendAsync(new MessageOptions { Prompt = input });
             await done.Task;
 
-            if (hadContent)
+            Console.ResetColor();
+            if (currentMode != OutputMode.None)
                 Console.WriteLine();
             Console.WriteLine();
         }
     }
 }
-
