@@ -297,6 +297,8 @@ public static class BuildsCommand
             // Hotkey bar
             bool canRetry = build.AzdoFailureState == "failed" || build.HelixFailureState == "failed";
             var hotkeys = new List<string>();
+            if (testFailures.Count > 0)
+                hotkeys.Add("[bold blue]T[/] Tests");
             if (helixItems.Count > 0)
                 hotkeys.Add("[bold blue]H[/] Helix Logs");
             if (triageDetail is not null)
@@ -310,6 +312,9 @@ public static class BuildsCommand
             var key = Console.ReadKey(true);
             switch (key.Key)
             {
+                case ConsoleKey.T when testFailures.Count > 0:
+                    await ShowTestListAsync(db, build, testFailures);
+                    break;
                 case ConsoleKey.H when helixItems.Count > 0:
                     await ShowHelixDrillDownAsync(helixItems);
                     break;
@@ -330,6 +335,121 @@ public static class BuildsCommand
                 case ConsoleKey.Q:
                     return;
             }
+        }
+    }
+
+    // --- Test drill-down ---
+
+    private static async Task ShowTestListAsync(MonitorClient db, MonitorBuildRecord build, List<MonitorTestFailureRecord> testFailures)
+    {
+        while (true)
+        {
+            var labels = testFailures.Select(f =>
+                $"{f.TestName} | {f.Outcome}")
+                .ToList();
+
+            var index = InteractiveMenu(labels, $"Test failures for build {build.AzdoBuildId} (↑↓ navigate, Enter select, Esc back):");
+            if (index < 0)
+                return;
+
+            var selected = testFailures[index];
+            await ShowTestHistoryAsync(db, selected.TestName);
+        }
+    }
+
+    private static async Task ShowTestHistoryAsync(MonitorClient db, string testName)
+    {
+        var builds = db.GetBuildsWithTestFailure(testName);
+
+        if (builds.Count == 0)
+        {
+            AnsiConsole.Clear();
+            AnsiConsole.MarkupLine("[dim]No builds found with this test failure.[/]");
+            AnsiConsole.MarkupLine("[dim]Press any key to return...[/]");
+            Console.ReadKey(true);
+            return;
+        }
+
+        int page = 0;
+        int pageSize = 10;
+
+        while (true)
+        {
+            int totalPages = (builds.Count + pageSize - 1) / pageSize;
+            var pageItems = builds.Skip(page * pageSize).Take(pageSize).ToList();
+
+            AnsiConsole.Clear();
+            AnsiConsole.MarkupLine($"[bold]Builds with test failure:[/]");
+            AnsiConsole.MarkupLine($"[dim]{testName.EscapeMarkup()}[/]");
+            AnsiConsole.MarkupLine($"[dim]Page {page + 1}/{totalPages} ({builds.Count} total)[/]");
+            AnsiConsole.WriteLine();
+
+            var labels = pageItems.Select(b =>
+            {
+                var branch = FormatBranch(b.SourceBranch);
+                var result = b.Result ?? "—";
+                var time = b.FinishTime ?? "—";
+                return $"{b.AzdoBuildId} | {b.Repository} | {branch} | {result} | {time}";
+            }).ToList();
+
+            // Navigation hints
+            var nav = new List<string> { "[bold blue]Enter[/] View build" };
+            if (page > 0) nav.Add("[bold blue]←[/] Prev page");
+            if (page < totalPages - 1) nav.Add("[bold blue]→[/] Next page");
+            nav.Add("[bold blue]Esc[/] Back");
+
+            int selected = 0;
+            Console.CursorVisible = false;
+            try
+            {
+                while (true)
+                {
+                    // Redraw list portion
+                    AnsiConsole.Cursor.SetPosition(0, 5);
+                    for (int i = 0; i < labels.Count; i++)
+                    {
+                        if (i == selected)
+                            AnsiConsole.MarkupLine($"[blue]> {labels[i].EscapeMarkup()}[/]");
+                        else
+                            AnsiConsole.MarkupLine($"  {labels[i].EscapeMarkup()}");
+                    }
+
+                    AnsiConsole.WriteLine();
+                    AnsiConsole.MarkupLine(string.Join("  │  ", nav));
+
+                    var key = Console.ReadKey(true);
+                    switch (key.Key)
+                    {
+                        case ConsoleKey.UpArrow:
+                            selected = Math.Max(0, selected - 1);
+                            break;
+                        case ConsoleKey.DownArrow:
+                            selected = Math.Min(labels.Count - 1, selected + 1);
+                            break;
+                        case ConsoleKey.LeftArrow when page > 0:
+                            page--;
+                            goto nextPage;
+                        case ConsoleKey.RightArrow when page < totalPages - 1:
+                            page++;
+                            goto nextPage;
+                        case ConsoleKey.Enter:
+                            var selectedBuild = pageItems[selected];
+                            var fullBuild = db.GetBuildByAzdoId(selectedBuild.AzdoBuildId);
+                            if (fullBuild is not null)
+                                await ShowBuildDetailAsync(db, fullBuild);
+                            goto nextPage; // redraw after returning
+                        case ConsoleKey.Escape:
+                        case ConsoleKey.Q:
+                            return;
+                    }
+                }
+            }
+            finally
+            {
+                Console.CursorVisible = true;
+            }
+
+            nextPage:;
         }
     }
 

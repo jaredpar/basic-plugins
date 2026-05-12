@@ -1195,6 +1195,51 @@ public sealed class MonitorClient : IDisposable
         return list;
     }
 
+    /// <summary>
+    /// Gets builds that had a specific test failure, ordered by most recent first.
+    /// </summary>
+    public List<MonitorBuildRecord> GetBuildsWithTestFailure(string testName, int limit = 100)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT b.azdo_build_id, b.repository, b.build_number, b.source_branch,
+                   b.definition_name, b.status, b.result, b.finish_time, b.has_test_failures,
+                   b.azdo_failure_state, b.helix_failure_state,
+                   (SELECT COUNT(*) FROM test_failures tf2 WHERE tf2.build_id = b.id) as failure_count,
+                   (SELECT COUNT(*) FROM helix_work_items h WHERE h.build_id = b.id) as helix_count
+            FROM builds b
+            JOIN test_failures tf ON tf.build_id = b.id
+            WHERE tf.test_name = @testName
+            ORDER BY b.created_at DESC
+            LIMIT @limit;
+            """;
+        cmd.Parameters.AddWithValue("@testName", testName);
+        cmd.Parameters.AddWithValue("@limit", limit);
+
+        var list = new List<MonitorBuildRecord>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            list.Add(new MonitorBuildRecord
+            {
+                AzdoBuildId = reader.GetInt32(0),
+                Repository = reader.GetString(1),
+                BuildNumber = reader.GetString(2),
+                SourceBranch = reader.GetString(3),
+                DefinitionName = reader.GetString(4),
+                Status = reader.GetString(5),
+                Result = reader.IsDBNull(6) ? null : reader.GetString(6),
+                FinishTime = reader.IsDBNull(7) ? null : reader.GetString(7),
+                HasTestFailures = reader.IsDBNull(8) ? null : reader.GetInt32(8) != 0,
+                AzdoFailureState = reader.GetString(9),
+                HelixFailureState = reader.GetString(10),
+                TestFailureCount = reader.GetInt32(11),
+                HelixFailureCount = reader.GetInt32(12),
+            });
+        }
+        return list;
+    }
+
     public void Dispose() => _connection.Dispose();
 }
 
