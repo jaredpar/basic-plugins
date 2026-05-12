@@ -1,45 +1,5 @@
-using System.Diagnostics;
-using Pipeline.Core;
 using Pipeline.Monitor;
 using Spectre.Console;
-
-const string McpServerName = "monitor-mcp";
-
-// --mcp: register the MCP server with copilot and exit
-if (args.Contains("--mcp"))
-{
-    var configPath2 = args.FirstOrDefault(a => !a.StartsWith('-'));
-    var dbPath2 = configPath2 is not null && File.Exists(configPath2)
-        ? Path.GetFullPath(MonitorConfig.Load(configPath2).Database)
-        : MonitorConfig.DefaultDatabasePath;
-    var mcpExeName = OperatingSystem.IsWindows() ? "monitor-mcp.exe" : "monitor.mcp";
-    var mcpExePath = Path.Combine(AppContext.BaseDirectory, mcpExeName);
-    if (!File.Exists(mcpExePath))
-    {
-        AnsiConsole.MarkupLine("[red]Could not find Pipeline.Mcp executable.[/]");
-        return 1;
-    }
-
-    var addArgs = $"mcp add {McpServerName} -- \"{mcpExePath}\" --database \"{dbPath2}\"";
-
-    var result = RunCopilot(addArgs);
-    if (result == 0)
-        AnsiConsole.MarkupLine($"[green]Registered MCP server '[bold]{McpServerName}[/]' with copilot.[/]");
-    else
-        AnsiConsole.MarkupLine($"[red]Failed to register MCP server (exit code {result}).[/]");
-    return result;
-}
-
-// --no-mcp: remove the MCP server from copilot and exit
-if (args.Contains("--no-mcp"))
-{
-    var result = RunCopilot($"mcp remove {McpServerName}");
-    if (result == 0)
-        AnsiConsole.MarkupLine($"[green]Removed MCP server '[bold]{McpServerName}[/]' from copilot.[/]");
-    else
-        AnsiConsole.MarkupLine($"[red]Failed to remove MCP server (exit code {result}).[/]");
-    return result;
-}
 
 // --init: create app data directory with default config and exit
 if (args.Contains("--init"))
@@ -112,15 +72,3 @@ var config = MonitorConfig.Load(configPath);
 await using var app = new MonitorApp(config);
 await app.RunAsync();
 return 0;
-
-static int RunCopilot(string arguments)
-{
-    var psi = new ProcessStartInfo("copilot", arguments)
-    {
-        UseShellExecute = false,
-    };
-
-    using var process = Process.Start(psi);
-    process?.WaitForExit();
-    return process?.ExitCode ?? 1;
-}
