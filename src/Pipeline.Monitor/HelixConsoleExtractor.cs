@@ -102,6 +102,7 @@ public static partial class HelixConsoleExtractor
         @"Unhandled\s+exception|Segmentation\s+fault|SIGABRT|SIGSEGV|core\s+dumped|" +
         @"Process\s+(exited|terminated|crashed)|exit\s+code\s+[^0]|" +
         @"System\.\w*Exception|FAILED|fatal\s+error|" +
+        @"The active test run was aborted|" +
         @"xUnit\.net\s+.*\[FAIL\])",
         RegexOptions.Compiled)]
     private static partial Regex ErrorPattern();

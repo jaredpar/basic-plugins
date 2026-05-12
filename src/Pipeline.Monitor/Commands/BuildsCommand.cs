@@ -376,7 +376,17 @@ public static class BuildsCommand
             var summaryRule = new Rule("[bold]Error Summary (extracted)[/]");
             summaryRule.Style = Style.Parse("red");
             AnsiConsole.Write(summaryRule);
-            AnsiConsole.WriteLine(item.ConsoleSummary);
+
+            var consoleWidth = Console.WindowWidth;
+            foreach (var line in item.ConsoleSummary.Split('\n'))
+            {
+                var text = line.TrimEnd('\r');
+                if (text.Length > consoleWidth)
+                {
+                    text = text[..consoleWidth];
+                }
+                Console.WriteLine(text);
+            }
         }
         else
         {
@@ -416,7 +426,6 @@ public static class BuildsCommand
             AnsiConsole.Write(logRule);
 
             var lines = consoleText.Split('\n');
-            var consoleWidth = Console.WindowWidth;
             if (lines.Length > 200)
             {
                 AnsiConsole.MarkupLine($"[dim]... ({lines.Length - 200} lines omitted, showing last 200) ...[/]");
@@ -425,8 +434,7 @@ public static class BuildsCommand
 
             foreach (var line in lines.TakeLast(200))
             {
-                var trimmed = line.Length > consoleWidth ? line[..consoleWidth] : line;
-                AnsiConsole.WriteLine(trimmed);
+                AnsiConsole.WriteLine(line);
             }
         }
         catch (Exception ex)
