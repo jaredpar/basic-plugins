@@ -124,8 +124,23 @@ public static class ConsoleCommand
                 }
             });
 
-            await session.SendAsync(new MessageOptions { Prompt = input });
-            await done.Task;
+            // Hook Ctrl+C to abort the current message instead of killing the process
+            ConsoleCancelEventHandler cancelHandler = (_, e) =>
+            {
+                e.Cancel = true;
+                _ = session.AbortAsync();
+            };
+            Console.CancelKeyPress += cancelHandler;
+
+            try
+            {
+                await session.SendAsync(new MessageOptions { Prompt = input });
+                await done.Task;
+            }
+            finally
+            {
+                Console.CancelKeyPress -= cancelHandler;
+            }
 
             Console.ResetColor();
             if (currentMode != OutputMode.None)
