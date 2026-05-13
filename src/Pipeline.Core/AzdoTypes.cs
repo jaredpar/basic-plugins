@@ -100,6 +100,9 @@ public class AzdoTestResult
     public string? ErrorMessage { get; init; }
     public string? StackTrace { get; init; }
     public string? Comment { get; init; }
+    public string? HelixJobName { get; init; }
+    public string? HelixWorkItemName { get; init; }
+    public bool IsHelixWorkItem { get; init; }
 }
 
 internal sealed class AzdoTestResultConverter : JsonConverter<AzdoTestResult>
@@ -119,16 +122,42 @@ internal sealed class AzdoTestResultConverter : JsonConverter<AzdoTestResult>
             testRunName = testRun.TryGetProperty("name", out var nameEl) ? nameEl.GetString() ?? "" : "";
         }
 
+        var comment = root.TryGetProperty("comment", out var c) ? c.GetString() : null;
+
+        string? helixJobName = null;
+        string? helixWorkItemName = null;
+        if (comment is not null && comment.Contains("HelixJobId", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                using var commentDoc = JsonDocument.Parse(comment);
+                var commentRoot = commentDoc.RootElement;
+                if (commentRoot.TryGetProperty("HelixJobId", out var jobId))
+                    helixJobName = jobId.GetString();
+                if (commentRoot.TryGetProperty("HelixWorkItemName", out var wiName))
+                    helixWorkItemName = wiName.GetString();
+            }
+            catch (JsonException)
+            {
+                // Comment is not JSON, ignore
+            }
+        }
+
+        var errorMessage = root.TryGetProperty("errorMessage", out var em) ? em.GetString() : null;
+
         return new AzdoTestResult
         {
             Id = root.GetProperty("id").GetInt32(),
             TestCaseTitle = root.GetProperty("testCaseTitle").GetString()!,
             Outcome = root.GetProperty("outcome").GetString()!,
-            ErrorMessage = root.TryGetProperty("errorMessage", out var em) ? em.GetString() : null,
+            ErrorMessage = errorMessage,
             StackTrace = root.TryGetProperty("stackTrace", out var st) ? st.GetString() : null,
-            Comment = root.TryGetProperty("comment", out var c) ? c.GetString() : null,
+            Comment = comment,
             TestRunId = testRunId,
             TestRunName = testRunName,
+            HelixJobName = helixJobName,
+            HelixWorkItemName = helixWorkItemName,
+            IsHelixWorkItem = errorMessage is not null && errorMessage.StartsWith("The Helix Work Item failed.", StringComparison.OrdinalIgnoreCase),
         };
     }
 
@@ -143,6 +172,9 @@ internal sealed class AzdoTestResultConverter : JsonConverter<AzdoTestResult>
         writer.WriteString("comment", value.Comment);
         writer.WriteNumber("testRunId", value.TestRunId);
         writer.WriteString("testRunName", value.TestRunName);
+        writer.WriteString("helixJobName", value.HelixJobName);
+        writer.WriteString("helixWorkItemName", value.HelixWorkItemName);
+        writer.WriteBoolean("isHelixWorkItem", value.IsHelixWorkItem);
         writer.WriteEndObject();
     }
 }
