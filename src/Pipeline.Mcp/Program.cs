@@ -10,9 +10,10 @@ builder.Logging.AddConsole(options =>
     options.LogToStandardErrorThreshold = LogLevel.Trace;
 });
 
-var credential = PipelineUtils.CreateCredential();
-builder.Services.AddSingleton(HelixClient.Create());
-builder.Services.AddSingleton(AzdoClient.Create(credential));
+var context = PipelineUtils.CreateContext();
+builder.Services.AddSingleton(context);
+builder.Services.AddSingleton(HelixClient.Create(context.HelixToken));
+builder.Services.AddSingleton(AzdoClient.Create(context.AzureCredential));
 
 builder.Services
     .AddMcpServer()

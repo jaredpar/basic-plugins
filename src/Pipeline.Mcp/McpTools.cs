@@ -10,6 +10,23 @@ public sealed class McpTools
 {
     private static readonly JsonSerializerOptions s_jsonOptions = new() { WriteIndented = true };
 
+    // Configuration
+
+    [McpServerTool(Name = "pl_config_status"), Description("Report pipeline configuration status including config directory path, Helix token status, and links to obtain credentials.")]
+    public static string GetConfigStatus(PipelineContext context)
+    {
+        var helixTokenPath = Path.Combine(context.ConfigDirectory, "helix.txt");
+        var hasHelixToken = context.HelixToken is not null;
+
+        return JsonSerializer.Serialize(new
+        {
+            configDirectory = context.ConfigDirectory,
+            helixTokenPath,
+            hasHelixToken,
+            helixTokenUrl = "https://helix.dot.net/Account/Tokens",
+        }, s_jsonOptions);
+    }
+
     // AzDO tools
 
     [McpServerTool(Name = "pl_azdo_builds_for_repo"), Description("Get AzDO builds for a GitHub repository. Returns both PR and CI builds by default.")]
