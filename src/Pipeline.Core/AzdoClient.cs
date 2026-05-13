@@ -5,143 +5,6 @@ using Azure.Core;
 
 namespace Pipeline.Core;
 
-public class AzdoBuild
-{
-    [JsonPropertyName("id")]
-    public int Id { get; init; }
-
-    [JsonPropertyName("buildNumber")]
-    public required string BuildNumber { get; init; }
-
-    [JsonPropertyName("status")]
-    public required string Status { get; init; }
-
-    [JsonPropertyName("result")]
-    public string? Result { get; init; }
-
-    [JsonPropertyName("uri")]
-    public required string Uri { get; init; }
-
-    [JsonPropertyName("sourceBranch")]
-    public required string SourceBranch { get; init; }
-
-    [JsonPropertyName("definitionName")]
-    public required string DefinitionName { get; init; }
-
-    [JsonPropertyName("finishTime")]
-    public DateTime? FinishTime { get; init; }
-}
-
-public class AzdoTimelineIssue
-{
-    public required string Type { get; init; }
-    public required string Message { get; init; }
-    public string? Category { get; init; }
-}
-
-public class AzdoTimelineRecord
-{
-    public required string Id { get; init; }
-    public string? ParentId { get; init; }
-    public required string Name { get; init; }
-    public required string RecordType { get; init; }
-    public int Order { get; init; }
-    public string? State { get; init; }
-    public string? Result { get; init; }
-    public int ErrorCount { get; init; }
-    public int WarningCount { get; init; }
-    public DateTime? StartTime { get; init; }
-    public DateTime? FinishTime { get; init; }
-    public List<AzdoTimelineIssue> Issues { get; init; } = [];
-    public string? WorkerName { get; init; }
-    public string? LogUrl { get; init; }
-}
-
-public class AzdoTimeline
-{
-    public required List<AzdoTimelineRecord> Records { get; init; }
-
-    /// <summary>All issues (errors and warnings) across all records.</summary>
-    public List<AzdoTimelineIssue> GetIssues() =>
-        Records.SelectMany(r => r.Issues).ToList();
-
-    /// <summary>Names of all Job records.</summary>
-    public List<string> GetJobNames() =>
-        Records.Where(r => r.RecordType == "Job").Select(r => r.Name).ToList();
-
-    /// <summary>Get direct children of a record (or top-level records if parentId is null).</summary>
-    public List<AzdoTimelineRecord> GetChildren(string? parentId) =>
-        Records.Where(r => r.ParentId == parentId).OrderBy(r => r.Order).ToList();
-}
-
-public class AzdoArtifact
-{
-    public int Id { get; init; }
-    public required string Name { get; init; }
-    public string? DownloadUrl { get; init; }
-    public string? ResourceType { get; init; }
-}
-
-public class AzdoJobTestSummary
-{
-    public required string JobName { get; init; }
-    public int TotalCount { get; init; }
-    public int PassedCount { get; init; }
-    public int FailedCount { get; init; }
-    public int SkippedCount { get; init; }
-}
-
-public class AzdoTestFailure
-{
-    [JsonPropertyName("testRunId")]
-    public int TestRunId { get; init; }
-
-    [JsonPropertyName("testRunName")]
-    public required string TestRunName { get; init; }
-
-    [JsonPropertyName("id")]
-    public required string TestCaseId { get; init; }
-
-    [JsonPropertyName("testCaseTitle")]
-    public required string TestCaseTitle { get; init; }
-
-    [JsonPropertyName("outcome")]
-    public required string Outcome { get; init; }
-
-    [JsonPropertyName("errorMessage")]
-    public string? ErrorMessage { get; init; }
-
-    [JsonPropertyName("stackTrace")]
-    public string? StackTrace { get; init; }
-
-    [JsonPropertyName("comment")]
-    public string? Comment { get; init; }
-}
-
-public class AzdoTestAttachment
-{
-    [JsonPropertyName("id")]
-    public int Id { get; init; }
-
-    [JsonPropertyName("fileName")]
-    public required string FileName { get; init; }
-
-    [JsonPropertyName("comment")]
-    public string? Comment { get; init; }
-
-    [JsonPropertyName("url")]
-    public string? Url { get; init; }
-
-    [JsonPropertyName("createdDate")]
-    public DateTime? CreatedDate { get; init; }
-
-    [JsonPropertyName("size")]
-    public long? Size { get; init; }
-
-    [JsonPropertyName("attachmentType")]
-    public string? AttachmentType { get; init; }
-}
-
 public sealed class AzdoClient
 {
     public const string DefaultOrganization = "dnceng-public";
@@ -271,7 +134,7 @@ public sealed class AzdoClient
         }).ToList();
     }
 
-    public async Task<List<AzdoTestFailure>> GetTestFailuresAsync(int buildId)
+    public async Task<List<AzdoTestResult>> GetTestFailuresAsync(int buildId)
     {
         var buildUri = $"vstfs:///Build/Build/{buildId}";
         var runsUrl = $"_apis/test/runs?api-version=7.1&buildUri={Uri.EscapeDataString(buildUri)}";
@@ -283,7 +146,7 @@ public sealed class AzdoClient
         var runs = JsonSerializer.Deserialize<AzdoListResponse<AzdoTestRun>>(runsJson, s_jsonOptions)
             ?? throw new InvalidOperationException("Failed to deserialize test runs response");
 
-        var failures = new List<AzdoTestFailure>();
+        var failures = new List<AzdoTestResult>();
         foreach (var run in runs.Value)
         {
             var resultsUrl = $"_apis/test/Runs/{run.Id}/results?api-version=7.1&outcomes=Failed";
@@ -294,19 +157,7 @@ public sealed class AzdoClient
             var results = JsonSerializer.Deserialize<AzdoListResponse<AzdoTestResult>>(resultsJson, s_jsonOptions)
                 ?? throw new InvalidOperationException("Failed to deserialize test results response");
 
-            foreach (var r in results.Value)
-            {
-                failures.Add(new AzdoTestFailure
-                {
-                    TestCaseTitle = r.TestCaseTitle,
-                    Outcome = r.Outcome,
-                    ErrorMessage = r.ErrorMessage,
-                    StackTrace = r.StackTrace,
-                    Comment = r.Comment,
-                    TestRunId = run.Id,
-                    TestRunName = run.Name,
-                });
-            }
+            failures.AddRange(results.Value);
         }
 
         return failures;
@@ -437,7 +288,7 @@ public sealed class AzdoClient
         return result.Value[0].Id;
     }
 
-    public async Task<List<AzdoTestFailure>> GetTestFailuresAsync(string buildNumber) =>
+    public async Task<List<AzdoTestResult>> GetTestFailuresAsync(string buildNumber) =>
         await GetTestFailuresAsync(await ResolveIdAsync(buildNumber));
 
     public async Task<List<AzdoJobTestSummary>> GetTestSummaryByJobAsync(string buildNumber) =>
@@ -515,27 +366,6 @@ public sealed class AzdoClient
 
         [JsonPropertyName("notApplicableTests")]
         public int NotApplicableTests { get; init; }
-    }
-
-    private class AzdoTestResult
-    {
-        [JsonPropertyName("id")]
-        public required string TestCaseId { get; init; }
-
-        [JsonPropertyName("testCaseTitle")]
-        public required string TestCaseTitle { get; init; }
-
-        [JsonPropertyName("outcome")]
-        public required string Outcome { get; init; }
-
-        [JsonPropertyName("errorMessage")]
-        public string? ErrorMessage { get; init; }
-
-        [JsonPropertyName("stackTrace")]
-        public string? StackTrace { get; init; }
-
-        [JsonPropertyName("comment")]
-        public string? Comment { get; init; }
     }
 
     private class AzdoTimelineRaw

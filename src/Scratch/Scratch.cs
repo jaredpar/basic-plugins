@@ -20,7 +20,14 @@ foreach (var build in builds)
     {
         if (test.Comment is not null && test.Comment.Contains("HelixJobId"))
         {
-            var attachments = await client.GetTestResultAttachmentsAsync(test.TestRunId, test.GetType)
+            var attachments = await client.GetTestResultAttachmentsAsync(test.TestRunId, test.Id);
+            foreach (var attachment in attachments)
+            {
+                Console.WriteLine($"""
+                    Name: {attachment.FileName}
+                    Content: {attachment.Url}
+                """);
+            }
         }
     }
 }
