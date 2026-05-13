@@ -10,107 +10,55 @@ public class HelixMcpTools
 {
     private static readonly JsonSerializerOptions s_jsonOptions = new() { WriteIndented = true };
 
-    [McpServerTool(Name = "helix_work_items_for_build"), Description("Get failed Helix work items for an AzDo build. Returns only failed items by default which is the desired behavior in almost all cases.")]
-    public static async Task<string> GetHelixWorkItemsForBuild(
+    [McpServerTool(Name = "helix_jobs"), Description("List Helix jobs matching filter criteria. Use source, type, and/or build to narrow results.")]
+    public static async Task<string> GetHelixJobs(
         HelixClient helix,
-        [Description("The repository owner (e.g. dotnet)")] string owner,
-        [Description("The repository name (e.g. roslyn)")] string repository,
-        [Description("The AzDO build ID (integer like 1379081)")] string buildId,
-        [Description("WARNING: Do not set to true unless the user explicitly asks for succeeded/passing work items. This is an expensive query. Default (false) returns only failed items which is correct for nearly all use cases.")] bool includeAll = false)
+        [Description("The job source (e.g. 'official/dotnet/runtime/main')")] string? source = null,
+        [Description("The job type (e.g. 'test/functional/cli')")] string? type = null,
+        [Description("The build number")] string? build = null,
+        [Description("The job name/correlation ID")] string? name = null,
+        [Description("Maximum number of jobs to return")] int count = 20)
     {
-        var items = int.TryParse(buildId, out var id)
-            ? await helix.GetHelixWorkItemsForBuildAsync(owner, repository, id, includeAll)
-            : await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll);
+        var jobs = await helix.GetJobsAsync(source, type, build, name, count: count);
+        return JsonSerializer.Serialize(jobs, s_jsonOptions);
+    }
+
+    [McpServerTool(Name = "helix_work_items"), Description("List all work items for a Helix job by job name.")]
+    public static async Task<string> GetHelixWorkItems(
+        HelixClient helix,
+        [Description("The Helix job name (correlation ID)")] string jobName)
+    {
+        var items = await helix.GetWorkItemsAsync(jobName);
         return JsonSerializer.Serialize(items, s_jsonOptions);
     }
 
-    [McpServerTool(Name = "helix_work_items_for_pr"), Description("Get failed Helix work items for a pull request. Returns only failed items by default which is the desired behavior in almost all cases.")]
-    public static async Task<string> GetHelixWorkItemsForPullRequest(
+    [McpServerTool(Name = "helix_work_item_details"), Description("Get detailed information about a specific Helix work item including logs, files, errors, exit code, and machine name.")]
+    public static async Task<string> GetHelixWorkItemDetails(
         HelixClient helix,
-        [Description("The repository owner (e.g. dotnet)")] string owner,
-        [Description("The repository name (e.g. roslyn)")] string repository,
-        [Description("The pull request number")] int prNumber,
-        [Description("WARNING: Do not set to true unless the user explicitly asks for succeeded/passing work items. This is an expensive query. Default (false) returns only failed items which is correct for nearly all use cases.")] bool includeAll = false)
+        [Description("The Helix job name (correlation ID)")] string jobName,
+        [Description("The work item name")] string workItemName)
     {
-        var items = await helix.GetHelixWorkItemsForPullRequestAsync(owner, repository, prNumber, includeAll);
-        return JsonSerializer.Serialize(items, s_jsonOptions);
+        var workItem = await helix.GetWorkItemAsync(jobName, workItemName);
+        return JsonSerializer.Serialize(workItem, s_jsonOptions);
     }
 
-    [McpServerTool(Name = "helix_console_for_build"), Description("Get console output for failed Helix work items in an AzDo build. Returns only failed items by default which is the desired behavior in almost all cases.")]
-    public static async Task<string> GetHelixConsoleForBuild(
+    [McpServerTool(Name = "helix_console"), Description("Get console output for a specific Helix work item.")]
+    public static async Task<string> GetHelixConsole(
         HelixClient helix,
-        [Description("The repository owner (e.g. dotnet)")] string owner,
-        [Description("The repository name (e.g. roslyn)")] string repository,
-        [Description("The AzDO build ID (integer like 1379081)")] string buildId,
-        [Description("WARNING: Do not set to true unless the user explicitly asks for succeeded/passing work items. This is an expensive query. Default (false) returns only failed items which is correct for nearly all use cases.")] bool includeAll = false)
+        [Description("The Helix job name (correlation ID)")] string jobName,
+        [Description("The work item name")] string workItemName)
     {
-        var items = int.TryParse(buildId, out var id)
-            ? await helix.GetHelixWorkItemsForBuildAsync(owner, repository, id, includeAll)
-            : await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll);
-        var consoles = await helix.GetConsolesAsync(items);
-        return JsonSerializer.Serialize(consoles, s_jsonOptions);
-    }
-
-    [McpServerTool(Name = "helix_console_for_pr"), Description("Get console output for failed Helix work items in a pull request. Returns only failed items by default which is the desired behavior in almost all cases.")]
-    public static async Task<string> GetHelixConsoleForPullRequest(
-        HelixClient helix,
-        [Description("The repository owner (e.g. dotnet)")] string owner,
-        [Description("The repository name (e.g. roslyn)")] string repository,
-        [Description("The pull request number")] int prNumber,
-        [Description("WARNING: Do not set to true unless the user explicitly asks for succeeded/passing work items. This is an expensive query. Default (false) returns only failed items which is correct for nearly all use cases.")] bool includeAll = false)
-    {
-        var items = await helix.GetHelixWorkItemsForPullRequestAsync(owner, repository, prNumber, includeAll);
-        var consoles = await helix.GetConsolesAsync(items);
-        return JsonSerializer.Serialize(consoles, s_jsonOptions);
-    }
-
-    [McpServerTool(Name = "helix_console_for_work_item"), Description("Get console output for a specific Helix work item by job ID and work item ID")]
-    public static async Task<string> GetHelixConsoleForWorkItem(
-        HelixClient helix,
-        [Description("The Helix job ID")] long jobId,
-        [Description("The Helix work item ID")] long workItemId)
-    {
-        var workItem = await helix.GetHelixWorkItemAsync(jobId, workItemId);
-        var console = await helix.GetConsoleAsync(workItem);
+        var console = await helix.GetConsoleAsync(jobName, workItemName);
         return JsonSerializer.Serialize(console, s_jsonOptions);
     }
 
-    [McpServerTool(Name = "helix_files_for_build"), Description("Get file metadata for failed Helix work items in an AzDo build. Returns only failed items by default which is the desired behavior in almost all cases.")]
-    public static async Task<string> GetHelixFilesForBuild(
+    [McpServerTool(Name = "helix_files"), Description("List files uploaded from a specific Helix work item.")]
+    public static async Task<string> GetHelixFiles(
         HelixClient helix,
-        [Description("The repository owner (e.g. dotnet)")] string owner,
-        [Description("The repository name (e.g. roslyn)")] string repository,
-        [Description("The AzDO build ID (integer like 1379081)")] string buildId,
-        [Description("WARNING: Do not set to true unless the user explicitly asks for succeeded/passing work items. This is an expensive query. Default (false) returns only failed items which is correct for nearly all use cases.")] bool includeAll = false)
+        [Description("The Helix job name (correlation ID)")] string jobName,
+        [Description("The work item name")] string workItemName)
     {
-        var items = int.TryParse(buildId, out var id)
-            ? await helix.GetHelixWorkItemsForBuildAsync(owner, repository, id, includeAll)
-            : await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll);
-        var files = await helix.GetFilesAsync(items);
-        return JsonSerializer.Serialize(files, s_jsonOptions);
-    }
-
-    [McpServerTool(Name = "helix_files_for_pr"), Description("Get file metadata for failed Helix work items in a pull request. Returns only failed items by default which is the desired behavior in almost all cases.")]
-    public static async Task<string> GetHelixFilesForPullRequest(
-        HelixClient helix,
-        [Description("The repository owner (e.g. dotnet)")] string owner,
-        [Description("The repository name (e.g. roslyn)")] string repository,
-        [Description("The pull request number")] int prNumber,
-        [Description("WARNING: Do not set to true unless the user explicitly asks for succeeded/passing work items. This is an expensive query. Default (false) returns only failed items which is correct for nearly all use cases.")] bool includeAll = false)
-    {
-        var items = await helix.GetHelixWorkItemsForPullRequestAsync(owner, repository, prNumber, includeAll);
-        var files = await helix.GetFilesAsync(items);
-        return JsonSerializer.Serialize(files, s_jsonOptions);
-    }
-
-    [McpServerTool(Name = "helix_files_for_work_item"), Description("Get file metadata for a specific Helix work item by job ID and work item ID")]
-    public static async Task<string> GetHelixFilesForWorkItem(
-        HelixClient helix,
-        [Description("The Helix job ID")] long jobId,
-        [Description("The Helix work item ID")] long workItemId)
-    {
-        var workItem = await helix.GetHelixWorkItemAsync(jobId, workItemId);
-        var files = await helix.GetFilesAsync(workItem);
+        var files = await helix.GetFilesAsync(jobName, workItemName);
         return JsonSerializer.Serialize(files, s_jsonOptions);
     }
 }

@@ -11,7 +11,7 @@ builder.Logging.AddConsole(options =>
 });
 
 var credential = PipelineUtils.CreateCredential();
-builder.Services.AddSingleton(HelixClient.Create(credential));
+builder.Services.AddSingleton(HelixClient.Create());
 builder.Services.AddSingleton(AzdoClient.Create(credential));
 
 builder.Services

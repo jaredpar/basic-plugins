@@ -30,6 +30,7 @@ static async Task<int> RunHelixAsync(string[] args)
 
     return action switch
     {
+        "jobs" => await RunHelixJobsAsync(actionArgs),
         "workitems" => await RunHelixWorkItemsAsync(actionArgs),
         "console" => await RunHelixConsoleAsync(actionArgs),
         "files" => await RunHelixFilesAsync(actionArgs),
@@ -37,222 +38,99 @@ static async Task<int> RunHelixAsync(string[] args)
     };
 }
 
+static async Task<int> RunHelixJobsAsync(string[] args)
+{
+    var source = GetOption(args, "--source");
+    var type = GetOption(args, "--type");
+    var build = GetOption(args, "--build");
+    var name = GetOption(args, "--name");
+    var countValue = GetOption(args, "--count");
+    var count = 20;
+    if (countValue is not null && !int.TryParse(countValue, out count))
+    {
+        Console.Error.WriteLine($"Error: --count must be an integer, got '{countValue}'");
+        return 1;
+    }
+
+    var helix = HelixClient.Create();
+    var jobs = await helix.GetJobsAsync(source, type, build, name, count: count);
+
+    var options = new JsonSerializerOptions { WriteIndented = true };
+    Console.WriteLine(JsonSerializer.Serialize(jobs, options));
+    return 0;
+}
+
 static async Task<int> RunHelixWorkItemsAsync(string[] args)
 {
-    var repo = GetOption(args, "--repo");
-    var prValue = GetOption(args, "--pr");
-    var buildValue = GetOption(args, "--build");
-    var includeAll = HasFlag(args, "--all");
-
-    if (repo is null)
+    var jobName = GetOption(args, "--job");
+    if (jobName is null)
     {
         PrintHelixUsage();
         return 1;
     }
 
-    var parts = repo.Split('/');
-    if (parts.Length != 2)
+    var helix = HelixClient.Create();
+
+    var workItemName = GetOption(args, "--workitem");
+    if (workItemName is not null)
     {
-        Console.Error.WriteLine($"Error: --repo must be in owner/repository format, got '{repo}'");
-        return 1;
-    }
-
-    var owner = parts[0];
-    var repository = parts[1];
-
-    if (prValue is null && buildValue is null)
-    {
-        PrintHelixUsage();
-        return 1;
-    }
-
-    var credential = PipelineUtils.CreateCredential();
-    var helix = await HelixClient.CreateAsync(credential);
-
-    List<HelixWorkItem> workItems;
-    if (prValue is not null)
-    {
-        if (!int.TryParse(prValue, out var prNumber))
-        {
-            Console.Error.WriteLine($"Error: --pr must be an integer, got '{prValue}'");
-            return 1;
-        }
-        workItems = await helix.GetHelixWorkItemsForPullRequestAsync(owner, repository, prNumber, includeAll);
+        var workItem = await helix.GetWorkItemAsync(jobName, workItemName);
+        var options = new JsonSerializerOptions { WriteIndented = true };
+        Console.WriteLine(JsonSerializer.Serialize(workItem, options));
     }
     else
     {
-        workItems = int.TryParse(buildValue, out var buildId)
-            ? await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll)
-            : await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildValue!, includeAll);
+        var workItems = await helix.GetWorkItemsAsync(jobName);
+        var options = new JsonSerializerOptions { WriteIndented = true };
+        Console.WriteLine(JsonSerializer.Serialize(workItems, options));
     }
 
-    var options = new JsonSerializerOptions { WriteIndented = true };
-    Console.WriteLine(JsonSerializer.Serialize(workItems, options));
     return 0;
 }
 
 static async Task<int> RunHelixConsoleAsync(string[] args)
 {
-    var repo = GetOption(args, "--repo");
-    var prValue = GetOption(args, "--pr");
-    var buildValue = GetOption(args, "--build");
-    var jobIdValue = GetOption(args, "--jobid");
-    var workItemIdValue = GetOption(args, "--workitemid");
-    var includeAll = HasFlag(args, "--all");
+    var jobName = GetOption(args, "--job");
+    var workItemName = GetOption(args, "--workitem");
 
-    var credential = PipelineUtils.CreateCredential();
-    var helix = await HelixClient.CreateAsync(credential);
-
-    if (jobIdValue is not null && workItemIdValue is not null)
-    {
-        if (!long.TryParse(jobIdValue, out var jobId))
-        {
-            Console.Error.WriteLine($"Error: --jobid must be a long, got '{jobIdValue}'");
-            return 1;
-        }
-
-        if (!long.TryParse(workItemIdValue, out var workItemId))
-        {
-            Console.Error.WriteLine($"Error: --workitemid must be a long, got '{workItemIdValue}'");
-            return 1;
-        }
-
-        var workItem = await helix.GetHelixWorkItemAsync(jobId, workItemId);
-        var console = await helix.GetConsoleAsync(workItem);
-        var options = new JsonSerializerOptions { WriteIndented = true };
-        Console.WriteLine(JsonSerializer.Serialize(console, options));
-        return 0;
-    }
-
-    if (repo is null)
+    if (jobName is null || workItemName is null)
     {
         PrintHelixUsage();
         return 1;
     }
 
-    var parts = repo.Split('/');
-    if (parts.Length != 2)
-    {
-        Console.Error.WriteLine($"Error: --repo must be in owner/repository format, got '{repo}'");
-        return 1;
-    }
-
-    var owner = parts[0];
-    var repository = parts[1];
-
-    if (prValue is null && buildValue is null)
-    {
-        PrintHelixUsage();
-        return 1;
-    }
-
-    List<HelixWorkItem> workItems;
-    if (prValue is not null)
-    {
-        if (!int.TryParse(prValue, out var prNumber))
-        {
-            Console.Error.WriteLine($"Error: --pr must be an integer, got '{prValue}'");
-            return 1;
-        }
-        workItems = await helix.GetHelixWorkItemsForPullRequestAsync(owner, repository, prNumber, includeAll);
-    }
-    else
-    {
-        workItems = int.TryParse(buildValue, out var buildId)
-            ? await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll)
-            : await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildValue!, includeAll);
-    }
-
-    var consoles = await helix.GetConsolesAsync(workItems);
-    var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
-    Console.WriteLine(JsonSerializer.Serialize(consoles, jsonOptions));
+    var helix = HelixClient.Create();
+    var console = await helix.GetConsoleAsync(jobName, workItemName);
+    var options = new JsonSerializerOptions { WriteIndented = true };
+    Console.WriteLine(JsonSerializer.Serialize(console, options));
     return 0;
 }
 
 static async Task<int> RunHelixFilesAsync(string[] args)
 {
-    var repo = GetOption(args, "--repo");
-    var prValue = GetOption(args, "--pr");
-    var buildValue = GetOption(args, "--build");
-    var jobIdValue = GetOption(args, "--jobid");
-    var workItemIdValue = GetOption(args, "--workitemid");
-    var includeAll = HasFlag(args, "--all");
+    var jobName = GetOption(args, "--job");
+    var workItemName = GetOption(args, "--workitem");
     var download = HasFlag(args, "--download");
     var downloadDir = GetOption(args, "--download") ?? ".pipeline-triage/files";
 
-    var credential = PipelineUtils.CreateCredential();
-    var helix = await HelixClient.CreateAsync(credential);
-
-    List<HelixWorkItem> workItems;
-    if (jobIdValue is not null && workItemIdValue is not null)
+    if (jobName is null || workItemName is null)
     {
-        if (!long.TryParse(jobIdValue, out var jobId))
-        {
-            Console.Error.WriteLine($"Error: --jobid must be a long, got '{jobIdValue}'");
-            return 1;
-        }
-
-        if (!long.TryParse(workItemIdValue, out var workItemId))
-        {
-            Console.Error.WriteLine($"Error: --workitemid must be a long, got '{workItemIdValue}'");
-            return 1;
-        }
-
-        var workItem = await helix.GetHelixWorkItemAsync(jobId, workItemId);
-        workItems = [workItem];
-    }
-    else
-    {
-        if (repo is null)
-        {
-            PrintHelixUsage();
-            return 1;
-        }
-
-        var parts = repo.Split('/');
-        if (parts.Length != 2)
-        {
-            Console.Error.WriteLine($"Error: --repo must be in owner/repository format, got '{repo}'");
-            return 1;
-        }
-
-        var owner = parts[0];
-        var repository = parts[1];
-
-        if (prValue is null && buildValue is null)
-        {
-            PrintHelixUsage();
-            return 1;
-        }
-
-        if (prValue is not null)
-        {
-            if (!int.TryParse(prValue, out var prNumber))
-            {
-                Console.Error.WriteLine($"Error: --pr must be an integer, got '{prValue}'");
-                return 1;
-            }
-            workItems = await helix.GetHelixWorkItemsForPullRequestAsync(owner, repository, prNumber, includeAll);
-        }
-        else
-        {
-            workItems = int.TryParse(buildValue, out var buildId)
-                ? await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildId, includeAll)
-                : await helix.GetHelixWorkItemsForBuildAsync(owner, repository, buildValue!, includeAll);
-        }
+        PrintHelixUsage();
+        return 1;
     }
 
-    var files = await helix.GetFilesAsync(workItems);
+    var helix = HelixClient.Create();
 
     if (download)
     {
-        await HelixClient.DownloadFilesAsync(files, downloadDir);
-        Console.WriteLine($"Downloaded {files.Count} file(s) to {downloadDir}");
+        await helix.DownloadFilesAsync(jobName, workItemName, downloadDir);
+        Console.WriteLine($"Downloaded files to {downloadDir}");
     }
     else
     {
-        var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
-        Console.WriteLine(JsonSerializer.Serialize(files, jsonOptions));
+        var files = await helix.GetFilesAsync(jobName, workItemName);
+        var options = new JsonSerializerOptions { WriteIndented = true };
+        Console.WriteLine(JsonSerializer.Serialize(files, options));
     }
 
     return 0;
@@ -372,14 +250,10 @@ static int PrintUsage()
 static int PrintHelixUsage()
 {
     Console.Error.WriteLine("Usage:");
-    Console.Error.WriteLine("  pipeline helix workitems --repo <owner/repo> --pr <number> [--all]");
-    Console.Error.WriteLine("  pipeline helix workitems --repo <owner/repo> --build <number> [--all]");
-    Console.Error.WriteLine("  pipeline helix console --repo <owner/repo> --pr <number> [--all]");
-    Console.Error.WriteLine("  pipeline helix console --repo <owner/repo> --build <number> [--all]");
-    Console.Error.WriteLine("  pipeline helix console --jobid <id> --workitemid <id>");
-    Console.Error.WriteLine("  pipeline helix files --repo <owner/repo> --pr <number> [--all] [--download [dir]]");
-    Console.Error.WriteLine("  pipeline helix files --repo <owner/repo> --build <number> [--all] [--download [dir]]");
-    Console.Error.WriteLine("  pipeline helix files --jobid <id> --workitemid <id> [--download [dir]]");
+    Console.Error.WriteLine("  pipeline helix jobs [--source <source>] [--type <type>] [--build <build>] [--name <name>] [--count <n>]");
+    Console.Error.WriteLine("  pipeline helix workitems --job <jobName> [--workitem <name>]");
+    Console.Error.WriteLine("  pipeline helix console --job <jobName> --workitem <name>");
+    Console.Error.WriteLine("  pipeline helix files --job <jobName> --workitem <name> [--download [dir]]");
     return 1;
 }
 

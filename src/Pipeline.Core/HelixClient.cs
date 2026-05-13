@@ -1,346 +1,180 @@
-using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
-using Azure.Core;
-using Kusto.Data;
-using Kusto.Data.Exceptions;
-using Kusto.Data.Net.Client;
-using Microsoft.Identity.Client.NativeInterop;
+using System.Net.Http.Headers;
+using System.Text.Json;
 
 namespace Pipeline.Core;
 
-public class HelixWorkItem
-{
-    [JsonPropertyName("friendlyName")]
-    public required string FriendlyName { get; init; }
-    [JsonPropertyName("executionTime")]
-    public int ExecutionTime { get; init; }
-    [JsonPropertyName("queueName")]
-    public required string QueueName { get; init; }
-    [JsonPropertyName("queuedTime")]
-    public int QueuedTime { get; init; }
-    [JsonPropertyName("azdoBuildId")]
-    public int AzdoBuildId { get; init; }
-    [JsonPropertyName("azdoPhaseName")]
-    public required string AzdoPhaseName { get; init; }
-    [JsonPropertyName("azdoAttempt")]
-    public int AzdoAttempt { get; init; }
-    [JsonPropertyName("machineName")]
-    public required string MachineName { get; init; }
-    [JsonPropertyName("exitCode")]
-    public int ExitCode { get; init; }
-    [JsonPropertyName("consoleUri")]
-    public required string ConsoleUri { get; init; }
-    [JsonPropertyName("jobId")]
-    public long JobId { get; init; }
-    [JsonPropertyName("jobName")]
-    public required string JobName { get; init; }
-    [JsonPropertyName("finished")]
-    public DateTime Finished { get; init; }
-    [JsonPropertyName("workItemId")]
-    public long WorkItemId { get; init; }
-    [JsonPropertyName("status")]
-    public required string Status { get; init; }
-}
-
-public class HelixWorkItemConsole
-{
-    [JsonPropertyName("jobId")]
-    public long JobId { get; init; }
-    [JsonPropertyName("workItemId")]
-    public long WorkItemId { get; init; }
-    [JsonPropertyName("text")]
-    public required string Text { get; init; }
-}
-
-public class HelixWorkItemFile
-{
-    [JsonPropertyName("jobId")]
-    public long JobId { get; init; }
-    [JsonPropertyName("workItemId")]
-    public long WorkItemId { get; init; }
-    [JsonPropertyName("jobName")]
-    public required string JobName { get; init; }
-    [JsonPropertyName("fileName")]
-    public required string FileName { get; init; }
-    [JsonPropertyName("uri")]
-    public required string Uri { get; init; }
-    [JsonPropertyName("sizeBytes")]
-    public long SizeBytes { get; init; }
-}
-
 public sealed class HelixClient
 {
-    private const string ClusterUrl = "https://engsrvprod.kusto.windows.net";
-    private const string DatabaseName = "engineeringdata";
+    private const string BaseUrl = "https://helix.dot.net/";
+    private const string ApiVersion = "2019-06-17";
 
-    private static readonly TokenRequestContext s_kustoTokenContext = new(["https://kusto.kusto.windows.net/.default"]);
-
-    private KustoConnectionStringBuilder KustoConnectionStringBuilder { get; }
-
-    private HelixClient(TokenCredential tokenCredential)
+    private static readonly JsonSerializerOptions s_jsonOptions = new()
     {
-        KustoConnectionStringBuilder = new KustoConnectionStringBuilder(ClusterUrl, DatabaseName)
-            .WithAadTokenProviderAuthentication(() =>
-                tokenCredential.GetToken(s_kustoTokenContext, default).Token);
+        PropertyNameCaseInsensitive = true,
+    };
+
+    private HttpClient HttpClient { get; }
+
+    private HelixClient(HttpClient httpClient)
+    {
+        HttpClient = httpClient;
     }
 
     /// <summary>
-    /// Creates a new <see cref="HelixClient"/>. Authentication is deferred
-    /// until the first Kusto query is executed.
+    /// Creates a new <see cref="HelixClient"/>. If a bearer token is provided it
+    /// will be used for authentication; otherwise requests are unauthenticated
+    /// (sufficient for all read-only endpoints).
     /// </summary>
-    public static HelixClient Create(TokenCredential tokenCredential) => new(tokenCredential);
+    public static HelixClient Create(string? bearerToken = null)
+    {
+        var httpClient = new HttpClient { BaseAddress = new Uri(BaseUrl) };
+        if (bearerToken is not null)
+        {
+            httpClient.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", bearerToken);
+        }
+
+        return new HelixClient(httpClient);
+    }
 
     /// <inheritdoc cref="Create"/>
-    public static Task<HelixClient> CreateAsync(TokenCredential tokenCredential) =>
-        Task.FromResult(Create(tokenCredential));
+    public static Task<HelixClient> CreateAsync(string? bearerToken = null) =>
+        Task.FromResult(Create(bearerToken));
 
-    public Task<List<HelixWorkItem>> GetHelixWorkItemsForBuildAsync(string owner, string repository, int buildId, bool includeAll = false)
+    /// <summary>
+    /// List jobs matching the given filter criteria.
+    /// </summary>
+    public async Task<List<HelixJob>> GetJobsAsync(
+        string? source = null,
+        string? type = null,
+        string? build = null,
+        string? name = null,
+        string? creator = null,
+        int count = 20)
     {
-        var failedFilter = includeAll ? "" : "| where ExitCode != 0";
-        string query = $"""
-            Jobs
-            | where Repository == "{owner}/{repository}"
-            | project-away Started, Finished
-            | join kind=inner WorkItems on JobId
-            | extend p = parse_json(Properties)
-            | extend AzdoBuildId = toint(p["BuildId"])
-            | where AzdoBuildId == {buildId}
-            | extend AzdoPhaseName = tostring(p["System.PhaseName"])
-            | extend AzdoAttempt = tostring(p["System.JobAttempt"])
-            | extend ExecutionTime = (Finished - Started) / 1s
-            | extend QueuedTime = (Started - Queued) / 1s
-            {failedFilter}
-            | project FriendlyName, ExecutionTime, QueuedTime, AzdoBuildId, AzdoPhaseName, AzdoAttempt, MachineName, ExitCode, ConsoleUri, JobId, JobName, QueueName, Finished, WorkItemId, Status
-            """;
+        var query = $"api-version={ApiVersion}&count={count}";
+        if (source is not null) query += $"&Source={Uri.EscapeDataString(source)}";
+        if (type is not null) query += $"&Type={Uri.EscapeDataString(type)}";
+        if (build is not null) query += $"&Build={Uri.EscapeDataString(build)}";
+        if (name is not null) query += $"&Name={Uri.EscapeDataString(name)}";
+        if (creator is not null) query += $"&Creator={Uri.EscapeDataString(creator)}";
 
-        return QueryHelixWorkItem(query);
+        var url = $"api/jobs?{query}";
+        return await GetAsync<List<HelixJob>>(url);
     }
 
-    public Task<List<HelixWorkItem>> GetHelixWorkItemsForBuildAsync(string owner, string repository, string buildNumber, bool includeAll = false)
+    /// <summary>
+    /// Get summary information about a single job.
+    /// </summary>
+    public async Task<HelixJob> GetJobAsync(string jobName)
     {
-        var failedFilter = includeAll ? "" : "| where ExitCode != 0";
-        string query = $"""
-            Jobs
-            | where Repository == "{owner}/{repository}"
-            | project-away Started, Finished
-            | join kind=inner WorkItems on JobId
-            | extend p = parse_json(Properties)
-            | extend AzdoBuildId = toint(p["BuildId"])
-            | where tostring(p["BuildNumber"]) == "{buildNumber}"
-            | extend AzdoPhaseName = tostring(p["System.PhaseName"])
-            | extend AzdoAttempt = tostring(p["System.JobAttempt"])
-            | extend ExecutionTime = (Finished - Started) / 1s
-            | extend QueuedTime = (Started - Queued) / 1s
-            {failedFilter}
-            | project FriendlyName, ExecutionTime, QueuedTime, AzdoBuildId, AzdoPhaseName, AzdoAttempt, MachineName, ExitCode, ConsoleUri, JobId, JobName, QueueName, Finished, WorkItemId, Status
-            """;
-
-        return QueryHelixWorkItem(query);
+        var url = $"api/jobs/{Uri.EscapeDataString(jobName)}?api-version={ApiVersion}";
+        return await GetAsync<HelixJob>(url);
     }
 
-    public Task<List<HelixWorkItem>> GetHelixWorkItemsForPullRequestAsync(string owner, string repository, int prNumber, bool includeAll = false)
+    /// <summary>
+    /// List all work items for a given job.
+    /// </summary>
+    public async Task<List<HelixWorkItemSummary>> GetWorkItemsAsync(string jobName)
     {
-        var failedFilter = includeAll ? "" : "| where ExitCode != 0";
-        string query = $"""
-            Jobs
-            | where Repository == "{owner}/{repository}"
-            | where Branch == "refs/pull/{prNumber}/merge"
-            | project-away Started, Finished
-            | join kind=inner WorkItems on JobId
-            | extend p = parse_json(Properties)
-            | extend AzdoPhaseName = tostring(p["System.PhaseName"])
-            | extend AzdoAttempt = tostring(p["System.JobAttempt"])
-            | extend AzdoBuildId = toint(p["BuildId"])
-            | extend ExecutionTime = (Finished - Started) / 1s
-            | extend QueuedTime = (Started - Queued) / 1s
-            {failedFilter}
-            | project FriendlyName, ExecutionTime, QueuedTime, AzdoBuildId, AzdoPhaseName, AzdoAttempt, MachineName, ExitCode, ConsoleUri, JobId, JobName, QueueName, Finished, WorkItemId, Status
-            """;
-
-        return QueryHelixWorkItem(query);
+        var url = $"api/jobs/{Uri.EscapeDataString(jobName)}/workitems?api-version={ApiVersion}";
+        return await GetAsync<List<HelixWorkItemSummary>>(url);
     }
 
-    public async Task<HelixWorkItem> GetHelixWorkItemAsync(long jobId, long workItemId)
+    /// <summary>
+    /// Get detailed information about a single work item.
+    /// </summary>
+    public async Task<HelixWorkItem> GetWorkItemAsync(string jobName, string workItemName)
     {
-        string query = $"""
-            WorkItems
-            | where JobId == {jobId}
-            | where WorkItemId == {workItemId}
-            | join kind=inner Jobs on JobId
-            | extend p = parse_json(Properties)
-            | extend AzdoPhaseName = tostring(p["System.PhaseName"])
-            | extend AzdoAttempt = tostring(p["System.JobAttempt"])
-            | extend AzdoBuildId = toint(p["BuildId"])
-            | extend ExecutionTime = (Finished - Started) / 1s
-            | extend QueuedTime = (Started - Queued) / 1s
-            | project FriendlyName, ExecutionTime, QueuedTime, AzdoBuildId, AzdoPhaseName, AzdoAttempt, MachineName, ExitCode, ConsoleUri, JobId, JobName, QueueName, Finished, WorkItemId, Status
-            """;
-
-        var items = await QueryHelixWorkItem(query);
-        return items.Single();
+        var url = $"api/jobs/{Uri.EscapeDataString(jobName)}/workitems/{Uri.EscapeDataString(workItemName)}?api-version={ApiVersion}";
+        return await GetAsync<HelixWorkItem>(url);
     }
 
-    private async Task<List<HelixWorkItem>> QueryHelixWorkItem(string query)
+    /// <summary>
+    /// Get console output for a specific work item.
+    /// </summary>
+    public async Task<HelixWorkItemConsole> GetConsoleAsync(string jobName, string workItemName)
     {
-        try
-        {
-            using var kustoQueryClient = KustoClientFactory.CreateCslQueryProvider(KustoConnectionStringBuilder);
-            var reader = kustoQueryClient.ExecuteQuery(query);
-            var list = new List<HelixWorkItem>();
-
-            // Read and print results
-            while (reader.Read())
-            {
-                var friendlyName = reader.GetString(0);
-                var executionTime = TimeSpan.FromSeconds(reader.GetDouble(1));
-                var queuedTime = TimeSpan.FromSeconds(reader.GetDouble(2));
-                var azdoBuildId = reader.GetInt32(3);
-                var azdoPhaseName = reader.GetString(4);
-                var azdoAttempt = int.Parse(reader.GetString(5));
-                var machineName = reader.GetString(6);
-                var exitCode = reader.GetInt32(7);
-                var consoleUri = reader.GetString(8);
-                var jobId = reader.GetInt64(9);
-                var jobName = reader.GetString(10);
-                var queueName = reader.GetString(11);
-                var finished = reader.GetDateTime(12);
-                var workItemId = reader.GetInt64(13);
-                var status = reader.GetString(14);
-
-                list.Add(new HelixWorkItem
-                {
-                    FriendlyName = friendlyName,
-                    ExecutionTime = (int)executionTime.TotalSeconds,
-                    QueuedTime = (int)queuedTime.TotalSeconds,
-                    AzdoBuildId = azdoBuildId,
-                    AzdoPhaseName = azdoPhaseName,
-                    AzdoAttempt = azdoAttempt,
-                    MachineName = machineName,
-                    ExitCode = exitCode,
-                    ConsoleUri = consoleUri,
-                    JobId = jobId,
-                    JobName = jobName,
-                    QueueName = queueName,
-                    Finished = finished,
-                    WorkItemId = workItemId,
-                    Status = status
-                });
-            }
-
-            return list;
-        }
-        catch (KustoRequestException ex) when (ex.ErrorReason == "Unauthorized")
-        {
-            Console.WriteLine("Error: access denied. You are not authorized to query this Kusto database. Ensure your account has been granted access.");
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine(ex.Message);
-            Console.WriteLine("Error reading Kusto, are you connected to the VPN?");
-            throw;
-        }
-    }
-
-    public async Task<HelixWorkItemConsole> GetConsoleAsync(HelixWorkItem workItem)
-    {
-        using var httpClient = new HttpClient();
-        var text = await httpClient.GetStringAsync(workItem.ConsoleUri);
+        var url = $"api/jobs/{Uri.EscapeDataString(jobName)}/workitems/{Uri.EscapeDataString(workItemName)}/console?api-version={ApiVersion}";
+        var response = await HttpClient.GetAsync(url);
+        response.EnsureSuccessStatusCode();
+        var text = await response.Content.ReadAsStringAsync();
         return new HelixWorkItemConsole
         {
-            JobId = workItem.JobId,
-            WorkItemId = workItem.WorkItemId,
-            Text = text
+            Job = jobName,
+            WorkItemName = workItemName,
+            Text = text,
         };
     }
 
-    public async Task<List<HelixWorkItemConsole>> GetConsolesAsync(List<HelixWorkItem> workItems)
+    /// <summary>
+    /// Get console output for multiple work items.
+    /// </summary>
+    public async Task<List<HelixWorkItemConsole>> GetConsolesAsync(string jobName, List<HelixWorkItemSummary> workItems)
     {
-        using var httpClient = new HttpClient();
         var list = new List<HelixWorkItemConsole>();
         foreach (var workItem in workItems)
         {
-            var text = await httpClient.GetStringAsync(workItem.ConsoleUri);
-            list.Add(new HelixWorkItemConsole
-            {
-                JobId = workItem.JobId,
-                WorkItemId = workItem.WorkItemId,
-                Text = text
-            });
+            var console = await GetConsoleAsync(jobName, workItem.Name);
+            list.Add(console);
         }
         return list;
     }
 
-    public async Task<List<HelixWorkItemFile>> GetFilesAsync(HelixWorkItem workItem)
+    /// <summary>
+    /// List files uploaded from a specific work item.
+    /// </summary>
+    public async Task<List<HelixUploadedFile>> GetFilesAsync(string jobName, string workItemName)
     {
-        return await GetFilesAsync([workItem]);
+        var url = $"api/jobs/{Uri.EscapeDataString(jobName)}/workitems/{Uri.EscapeDataString(workItemName)}/files?api-version={ApiVersion}";
+        return await GetAsync<List<HelixUploadedFile>>(url);
     }
 
-    public async Task<List<HelixWorkItemFile>> GetFilesAsync(List<HelixWorkItem> workItems)
+    /// <summary>
+    /// Download a specific file from a work item to a local path.
+    /// </summary>
+    public async Task DownloadFileAsync(string jobName, string workItemName, string fileName, string outputPath)
     {
-        if (workItems.Count == 0)
-            return [];
-
-        var jobNameMap = workItems.ToDictionary(w => w.WorkItemId, w => w.JobName);
-        var workItemIds = string.Join(", ", workItems.Select(w => w.WorkItemId));
-        string query = $"""
-            Files
-            | where WorkItemId in ({workItemIds})
-            | project JobId, WorkItemId, FileName, Uri, SizeBytesLong
-            """;
-
-        try
+        var url = $"api/jobs/{Uri.EscapeDataString(jobName)}/workitems/{Uri.EscapeDataString(workItemName)}/files/{Uri.EscapeDataString(fileName)}?api-version={ApiVersion}";
+        var response = await HttpClient.GetAsync(url);
+        response.EnsureSuccessStatusCode();
+        var bytes = await response.Content.ReadAsByteArrayAsync();
+        var dir = Path.GetDirectoryName(outputPath);
+        if (dir is not null)
         {
-            using var kustoQueryClient = KustoClientFactory.CreateCslQueryProvider(KustoConnectionStringBuilder);
-            var reader = kustoQueryClient.ExecuteQuery(query);
-            var list = new List<HelixWorkItemFile>();
-
-            while (reader.Read())
-            {
-                var jobId = reader.GetInt64(0);
-                var workItemId = reader.GetInt64(1);
-                var fileName = reader.GetString(2);
-                var uri = reader.GetString(3);
-                var sizeBytes = reader.GetInt64(4);
-
-                var jobName = jobNameMap.GetValueOrDefault(workItemId, "unknown");
-
-                list.Add(new HelixWorkItemFile
-                {
-                    JobId = jobId,
-                    WorkItemId = workItemId,
-                    JobName = jobName,
-                    FileName = fileName,
-                    Uri = uri,
-                    SizeBytes = sizeBytes
-                });
-            }
-
-            return list;
+            Directory.CreateDirectory(dir);
         }
-        catch (KustoRequestException ex) when (ex.ErrorReason == "Unauthorized")
-        {
-            Console.WriteLine("Error: access denied. You are not authorized to query this Kusto database. Ensure your account has been granted access.");
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine(ex.Message);
-            Console.WriteLine("Error reading Kusto, are you connected to the VPN?");
-            throw;
-        }
+        await File.WriteAllBytesAsync(outputPath, bytes);
     }
 
-    public static async Task DownloadFilesAsync(List<HelixWorkItemFile> files, string outputDir)
+    /// <summary>
+    /// Download all files from a work item to a directory.
+    /// </summary>
+    public async Task DownloadFilesAsync(string jobName, string workItemName, string outputDir)
     {
+        var files = await GetFilesAsync(jobName, workItemName);
         using var httpClient = new HttpClient();
         foreach (var file in files)
         {
-            var dir = Path.Combine(outputDir, file.JobName, file.WorkItemId.ToString());
-            Directory.CreateDirectory(dir);
-            var filePath = Path.Combine(dir, file.FileName);
-            var bytes = await httpClient.GetByteArrayAsync(file.Uri);
+            if (file.Name is null || file.Link is null)
+                continue;
+            var filePath = Path.Combine(outputDir, jobName, workItemName, file.Name);
+            var dir = Path.GetDirectoryName(filePath);
+            if (dir is not null)
+            {
+                Directory.CreateDirectory(dir);
+            }
+            var bytes = await httpClient.GetByteArrayAsync(file.Link);
             await File.WriteAllBytesAsync(filePath, bytes);
         }
+    }
+
+    private async Task<T> GetAsync<T>(string url)
+    {
+        var response = await HttpClient.GetAsync(url);
+        response.EnsureSuccessStatusCode();
+        var json = await response.Content.ReadAsStringAsync();
+        return JsonSerializer.Deserialize<T>(json, s_jsonOptions)
+            ?? throw new InvalidOperationException($"Failed to deserialize response from {url}");
     }
 }
