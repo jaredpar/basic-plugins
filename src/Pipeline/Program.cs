@@ -30,34 +30,11 @@ static async Task<int> RunHelixAsync(string[] args)
 
     return action switch
     {
-        "jobs" => await RunHelixJobsAsync(actionArgs),
         "workitems" => await RunHelixWorkItemsAsync(actionArgs),
         "console" => await RunHelixConsoleAsync(actionArgs),
         "files" => await RunHelixFilesAsync(actionArgs),
         _ => PrintHelixUsage(),
     };
-}
-
-static async Task<int> RunHelixJobsAsync(string[] args)
-{
-    var source = GetOption(args, "--source");
-    var type = GetOption(args, "--type");
-    var build = GetOption(args, "--build");
-    var name = GetOption(args, "--name");
-    var countValue = GetOption(args, "--count");
-    var count = 20;
-    if (countValue is not null && !int.TryParse(countValue, out count))
-    {
-        Console.Error.WriteLine($"Error: --count must be an integer, got '{countValue}'");
-        return 1;
-    }
-
-    var helix = HelixClient.Create();
-    var jobs = await helix.GetJobsAsync(source, type, build, name, count: count);
-
-    var options = new JsonSerializerOptions { WriteIndented = true };
-    Console.WriteLine(JsonSerializer.Serialize(jobs, options));
-    return 0;
 }
 
 static async Task<int> RunHelixWorkItemsAsync(string[] args)
@@ -250,7 +227,6 @@ static int PrintUsage()
 static int PrintHelixUsage()
 {
     Console.Error.WriteLine("Usage:");
-    Console.Error.WriteLine("  pipeline helix jobs [--source <source>] [--type <type>] [--build <build>] [--name <name>] [--count <n>]");
     Console.Error.WriteLine("  pipeline helix workitems --job <jobName> [--workitem <name>]");
     Console.Error.WriteLine("  pipeline helix console --job <jobName> --workitem <name>");
     Console.Error.WriteLine("  pipeline helix files --job <jobName> --workitem <name> [--download [dir]]");

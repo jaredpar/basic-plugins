@@ -42,28 +42,6 @@ public sealed class HelixClient
         Task.FromResult(Create(bearerToken));
 
     /// <summary>
-    /// List jobs matching the given filter criteria.
-    /// </summary>
-    public async Task<List<HelixJob>> GetJobsAsync(
-        string? source = null,
-        string? type = null,
-        string? build = null,
-        string? name = null,
-        string? creator = null,
-        int count = 20)
-    {
-        var query = $"api-version={ApiVersion}&count={count}";
-        if (source is not null) query += $"&Source={Uri.EscapeDataString(source)}";
-        if (type is not null) query += $"&Type={Uri.EscapeDataString(type)}";
-        if (build is not null) query += $"&Build={Uri.EscapeDataString(build)}";
-        if (name is not null) query += $"&Name={Uri.EscapeDataString(name)}";
-        if (creator is not null) query += $"&Creator={Uri.EscapeDataString(creator)}";
-
-        var url = $"api/jobs?{query}";
-        return await GetAsync<List<HelixJob>>(url);
-    }
-
-    /// <summary>
     /// Get summary information about a single job.
     /// </summary>
     public async Task<HelixJob> GetJobAsync(string jobName)
