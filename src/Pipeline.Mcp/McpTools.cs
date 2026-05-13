@@ -6,11 +6,13 @@ using Pipeline.Core;
 namespace Pipeline.Mcp;
 
 [McpServerToolType]
-public class AzdoMcpTools
+public sealed class McpTools
 {
     private static readonly JsonSerializerOptions s_jsonOptions = new() { WriteIndented = true };
 
-    [McpServerTool(Name = "azdo_builds_for_repo"), Description("Get AzDO builds for a GitHub repository. Returns both PR and CI builds by default.")]
+    // AzDO tools
+
+    [McpServerTool(Name = "pl_azdo_builds_for_repo"), Description("Get AzDO builds for a GitHub repository. Returns both PR and CI builds by default.")]
     public static async Task<string> GetBuildsForRepository(
         AzdoClient azdoClient,
         [Description("The GitHub repository in owner/repo format (e.g. dotnet/roslyn)")] string repository,
@@ -28,7 +30,7 @@ public class AzdoMcpTools
         return JsonSerializer.Serialize(builds, s_jsonOptions);
     }
 
-    [McpServerTool(Name = "azdo_recent_builds"), Description("Get recent AzDO builds, optionally filtered by pipeline definition ID.")]
+    [McpServerTool(Name = "pl_azdo_recent_builds"), Description("Get recent AzDO builds, optionally filtered by pipeline definition ID.")]
     public static async Task<string> GetRecentBuilds(
         AzdoClient azdoClient,
         [Description("Optional pipeline definition ID to filter by")] int? definitionId = null,
@@ -38,7 +40,7 @@ public class AzdoMcpTools
         return JsonSerializer.Serialize(builds, s_jsonOptions);
     }
 
-    [McpServerTool(Name = "azdo_pr_builds"), Description("Get AzDO builds for a specific pull request.")]
+    [McpServerTool(Name = "pl_azdo_pr_builds"), Description("Get AzDO builds for a specific pull request.")]
     public static async Task<string> GetBuildsForPullRequest(
         AzdoClient azdoClient,
         [Description("The GitHub repository in owner/repo format (e.g. dotnet/roslyn)")] string repository,
@@ -49,7 +51,7 @@ public class AzdoMcpTools
         return JsonSerializer.Serialize(builds, s_jsonOptions);
     }
 
-    [McpServerTool(Name = "azdo_test_failures"), Description("Get test failures for an AzDO build.")]
+    [McpServerTool(Name = "pl_azdo_test_failures"), Description("Get test failures for an AzDO build.")]
     public static async Task<string> GetTestFailures(
         AzdoClient azdoClient,
         [Description("The AzDO build ID (integer like 1379081)")] string buildId)
@@ -60,7 +62,7 @@ public class AzdoMcpTools
         return JsonSerializer.Serialize(failures, s_jsonOptions);
     }
 
-    [McpServerTool(Name = "azdo_test_summary"), Description("Get test counts for each job (test run) in an AzDO build. Returns an array where each entry has job name, total test count, passed count, failed count, and skipped count.")]
+    [McpServerTool(Name = "pl_azdo_test_summary"), Description("Get test counts for each job (test run) in an AzDO build. Returns an array where each entry has job name, total test count, passed count, failed count, and skipped count.")]
     public static async Task<string> GetTestSummary(
         AzdoClient azdoClient,
         [Description("The AzDO build ID (integer like 1379081)")] string buildId)
@@ -71,7 +73,7 @@ public class AzdoMcpTools
         return JsonSerializer.Serialize(summaries, s_jsonOptions);
     }
 
-    [McpServerTool(Name = "azdo_timeline"), Description("Get the timeline (all records) for an AzDO build.")]
+    [McpServerTool(Name = "pl_azdo_timeline"), Description("Get the timeline (all records) for an AzDO build.")]
     public static async Task<string> GetTimeline(
         AzdoClient azdoClient,
         [Description("The AzDO build ID (integer like 1379081)")] string buildId)
@@ -82,7 +84,7 @@ public class AzdoMcpTools
         return JsonSerializer.Serialize(timeline, s_jsonOptions);
     }
 
-    [McpServerTool(Name = "azdo_artifacts"), Description("Get build artifacts for an AzDO build.")]
+    [McpServerTool(Name = "pl_azdo_artifacts"), Description("Get build artifacts for an AzDO build.")]
     public static async Task<string> GetArtifacts(
         AzdoClient azdoClient,
         [Description("The AzDO build ID (integer like 1379081)")] string buildId)
@@ -93,7 +95,7 @@ public class AzdoMcpTools
         return JsonSerializer.Serialize(artifacts, s_jsonOptions);
     }
 
-    [McpServerTool(Name = "azdo_jobs"), Description("Get job records from an AzDO build timeline.")]
+    [McpServerTool(Name = "pl_azdo_jobs"), Description("Get job records from an AzDO build timeline.")]
     public static async Task<string> GetJobs(
         AzdoClient azdoClient,
         [Description("The AzDO build ID (integer like 1379081)")] string buildId)
@@ -106,5 +108,46 @@ public class AzdoMcpTools
             .OrderBy(r => r.Order)
             .ToList();
         return JsonSerializer.Serialize(jobs, s_jsonOptions);
+    }
+
+    // Helix tools
+
+    [McpServerTool(Name = "pl_helix_work_items"), Description("List all work items for a Helix job by job name.")]
+    public static async Task<string> GetHelixWorkItems(
+        HelixClient helix,
+        [Description("The Helix job name (correlation ID)")] string jobName)
+    {
+        var items = await helix.GetWorkItemsAsync(jobName);
+        return JsonSerializer.Serialize(items, s_jsonOptions);
+    }
+
+    [McpServerTool(Name = "pl_helix_work_item_details"), Description("Get detailed information about a specific Helix work item including logs, files, errors, exit code, and machine name.")]
+    public static async Task<string> GetHelixWorkItemDetails(
+        HelixClient helix,
+        [Description("The Helix job name (correlation ID)")] string jobName,
+        [Description("The work item name")] string workItemName)
+    {
+        var workItem = await helix.GetWorkItemAsync(jobName, workItemName);
+        return JsonSerializer.Serialize(workItem, s_jsonOptions);
+    }
+
+    [McpServerTool(Name = "pl_helix_console"), Description("Get console output for a specific Helix work item.")]
+    public static async Task<string> GetHelixConsole(
+        HelixClient helix,
+        [Description("The Helix job name (correlation ID)")] string jobName,
+        [Description("The work item name")] string workItemName)
+    {
+        var console = await helix.GetConsoleAsync(jobName, workItemName);
+        return JsonSerializer.Serialize(console, s_jsonOptions);
+    }
+
+    [McpServerTool(Name = "pl_helix_files"), Description("List files uploaded from a specific Helix work item.")]
+    public static async Task<string> GetHelixFiles(
+        HelixClient helix,
+        [Description("The Helix job name (correlation ID)")] string jobName,
+        [Description("The work item name")] string workItemName)
+    {
+        var files = await helix.GetFilesAsync(jobName, workItemName);
+        return JsonSerializer.Serialize(files, s_jsonOptions);
     }
 }
