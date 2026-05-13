@@ -12,7 +12,7 @@ public sealed class McpTools
 
     // Configuration
 
-    [McpServerTool(Name = "pl_config_status"), Description("Report pipeline configuration status including config directory path, Helix token status, and links to obtain credentials.")]
+    [McpServerTool(Name = "pl_config"), Description("Report pipeline configuration status including config directory path, Helix token status, and links to obtain credentials.")]
     public static string GetConfigStatus(PipelineContext context)
     {
         var helixTokenPath = Path.Combine(context.ConfigDirectory, "helix.txt");
