@@ -93,6 +93,15 @@ public class AzdoJobTestSummary
 
 public class AzdoTestFailure
 {
+    [JsonPropertyName("testRunId")]
+    public int TestRunId { get; init; }
+
+    [JsonPropertyName("testRunName")]
+    public required string TestRunName { get; init; }
+
+    [JsonPropertyName("id")]
+    public required string TestCaseId { get; init; }
+
     [JsonPropertyName("testCaseTitle")]
     public required string TestCaseTitle { get; init; }
 
@@ -107,12 +116,30 @@ public class AzdoTestFailure
 
     [JsonPropertyName("comment")]
     public string? Comment { get; init; }
+}
 
-    [JsonPropertyName("testRunId")]
-    public int TestRunId { get; init; }
+public class AzdoTestAttachment
+{
+    [JsonPropertyName("id")]
+    public int Id { get; init; }
 
-    [JsonPropertyName("testRunName")]
-    public required string TestRunName { get; init; }
+    [JsonPropertyName("fileName")]
+    public required string FileName { get; init; }
+
+    [JsonPropertyName("comment")]
+    public string? Comment { get; init; }
+
+    [JsonPropertyName("url")]
+    public string? Url { get; init; }
+
+    [JsonPropertyName("createdDate")]
+    public DateTime? CreatedDate { get; init; }
+
+    [JsonPropertyName("size")]
+    public long? Size { get; init; }
+
+    [JsonPropertyName("attachmentType")]
+    public string? AttachmentType { get; init; }
 }
 
 public sealed class AzdoClient
@@ -283,6 +310,19 @@ public sealed class AzdoClient
         }
 
         return failures;
+    }
+
+    public async Task<List<AzdoTestAttachment>> GetTestResultAttachmentsAsync(int runId, int testCaseResultId)
+    {
+        var url = $"_apis/test/Runs/{runId}/Results/{testCaseResultId}/attachments?api-version=7.2-preview.1";
+        var response = await HttpClient.GetAsync(url);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync();
+        var result = JsonSerializer.Deserialize<AzdoListResponse<AzdoTestAttachment>>(json, s_jsonOptions)
+            ?? throw new InvalidOperationException("Failed to deserialize test result attachments response");
+
+        return result.Value;
     }
 
     public async Task<List<AzdoJobTestSummary>> GetTestSummaryByJobAsync(int buildId)
@@ -479,6 +519,9 @@ public sealed class AzdoClient
 
     private class AzdoTestResult
     {
+        [JsonPropertyName("id")]
+        public required string TestCaseId { get; init; }
+
         [JsonPropertyName("testCaseTitle")]
         public required string TestCaseTitle { get; init; }
 
